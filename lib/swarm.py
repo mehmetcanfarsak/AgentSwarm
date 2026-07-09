@@ -87,16 +87,42 @@ def session_exists(session: str) -> bool:
         return False
 
 
-PASTE_ATTEMPTS = 3
+PASTE_ATTEMPTS = 2
 VERIFY_TIMEOUT_MS = 3000
+VERIFY_SCROLLBACK = 200
+NEEDLE_LEN = 28
 # Claude Code collapses a long paste into a "[Pasted text #1 +N lines]" chip,
 # so the text itself never appears on screen. Treat the chip as proof of arrival.
 PASTE_CHIP = "Pastedtext"
 
 
+def pane_text(session: str, scrollback: int = 0) -> str:
+    args = ["capture-pane", "-p", "-t", session]
+    if scrollback:
+        args[2:2] = ["-S", f"-{scrollback}"]
+    try:
+        return tmux(*args, capture=True).stdout or ""
+    except subprocess.CalledProcessError:
+        return ""
+
+
+def visible_pane(session: str) -> str:
+    return pane_text(session)
+
+
+def needle_for(body: str) -> str:
+    """The *tail* of the text, which is what stays on screen after a paste.
+
+    Using the head would be wrong: a long prompt pushes its own first line out
+    of the pane, and the cursor -- hence the visible end of the text -- sits at
+    the bottom.
+    """
+    return normalise(body)[-NEEDLE_LEN:]
+
+
 def paste_score(session: str, needle: str) -> int:
-    """How many times the text we are about to send is already on screen."""
-    pane = normalise(visible_pane(session))
+    """How many times the text we are about to send already appears on screen."""
+    pane = normalise(pane_text(session, VERIFY_SCROLLBACK))
     return pane.count(needle) + pane.count(PASTE_CHIP)
 
 
@@ -130,10 +156,16 @@ def paste_into(cfg: SwarmConfig, session: str, text: str, enter: bool = True) ->
     if not session_exists(session):
         raise SwarmError(f"tmux session {session!r} is not running")
 
-    needle = normalise(body)[:28]
+    needle = needle_for(body)
     delivered = False
 
     for attempt in range(1, PASTE_ATTEMPTS + 1):
+        if attempt > 1:
+            # Best effort: clear anything a previous attempt may have left behind,
+            # so a retry cannot concatenate two copies of the prompt.
+            tmux("send-keys", "-t", session, "C-u", check=False)
+            sleep_ms(300)
+
         before = paste_score(session, needle)
         sleep_ms(cfg.send_delay_ms)
         send_buffer(session, body)
@@ -147,16 +179,17 @@ def paste_into(cfg: SwarmConfig, session: str, text: str, enter: bool = True) ->
         if delivered:
             break
         warn(f"{session}: pasted text never appeared (attempt {attempt}/{PASTE_ATTEMPTS})")
-        sleep_ms(1500)
 
     if not delivered:
-        # Most likely nothing arrived, in which case Enter is a harmless no-op.
-        warn(f"{session}: could not confirm the text arrived; pressing Enter anyway")
+        # Do not press Enter: if the text did arrive and we simply failed to see
+        # it, submitting now could send a mangled or duplicated prompt.
+        warn(f"{session}: could not confirm the text arrived; NOT pressing Enter")
+        return False
 
     if enter:
         sleep_ms(cfg.enter_delay_ms)
         tmux("send-keys", "-t", session, "Enter")
-    return delivered
+    return True
 
 
 # --------------------------------------------------------------------------
@@ -284,7 +317,12 @@ def deliver(
     body = f"{header}\n{text}"
     if target.capture == "pane":
         record_echo(cfg, recipient, body)
-    paste_into(cfg, target.session, body)
+
+    if not paste_into(cfg, target.session, body):
+        raise SwarmError(
+            f"could not confirm the message reached {recipient!r}; "
+            f"inspect it with: swarm attach {recipient}"
+        )
 
     write_hops(cfg, recipient, hops)
     log_event(cfg, sender, "sent", to=recipient, hops=hops, text=text)
@@ -341,6 +379,18 @@ def install_claude_hook(agent: Agent) -> None:
     settings_path.write_text(json.dumps(settings, indent=2) + "\n")
 
 
+def valid_toml(text: str) -> bool:
+    try:
+        import tomllib
+    except ImportError:  # Python < 3.11: cannot check, assume the caller is right
+        return True
+    try:
+        tomllib.loads(text)
+        return True
+    except tomllib.TOMLDecodeError:
+        return False
+
+
 def install_codex_hook(agent: Agent) -> Path:
     """Give codex a private CODEX_HOME with a `notify` program wired up."""
     codex_home = agent.workdir / ".codex"
@@ -348,7 +398,7 @@ def install_codex_hook(agent: Agent) -> Path:
 
     # Carry over the user's real credentials + settings, so the agent is logged in.
     user_home = Path(os.path.expanduser("~")) / ".codex"
-    base_config = ""
+    base = ""
     if user_home.is_dir() and user_home.resolve() != codex_home.resolve():
         for name in ("auth.json",):
             src, dst = user_home / name, codex_home / name
@@ -359,21 +409,42 @@ def install_codex_hook(agent: Agent) -> Path:
                     shutil.copy2(src, dst)
         user_cfg = user_home / "config.toml"
         if user_cfg.is_file():
-            base_config = "\n".join(
+            base = "\n".join(
                 line
                 for line in user_cfg.read_text().splitlines()
-                if not line.strip().startswith("notify")
-            )
+                if not re.match(r"\s*notify\s*=", line)
+            ).strip()
 
-    notify = str(HOOKS_DIR / "codex_notify.sh")
-    body = (base_config.rstrip() + "\n\n") if base_config.strip() else ""
-    body += "# installed by AgentSwarm -- fires when codex finishes a turn\n"
-    body += f"notify = [{json.dumps(notify)}]\n\n"
-    # Without this, codex opens a "do you trust this directory?" modal on first
-    # run in a fresh folder, which would swallow the agent's first prompt.
-    body += "# pre-trust the agent's workdir so no modal eats the first prompt\n"
-    body += f"[projects.{json.dumps(str(agent.workdir))}]\n"
-    body += 'trust_level = "trusted"\n'
+    notify = json.dumps(str(HOOKS_DIR / "codex_notify.sh"))
+    # Without this table codex opens a "do you trust this directory?" modal on
+    # first run in a fresh folder, and that modal swallows the first prompt.
+    trust = f"[projects.{json.dumps(str(agent.workdir))}]"
+
+    # TOML is order-sensitive: a bare key written after a [table] header belongs
+    # to that table. `notify` must therefore come before anything else, or codex
+    # reads it as projects.<dir>.notify and never calls it.
+    chunks = [
+        "# installed by AgentSwarm -- fires when codex finishes a turn.",
+        "# Keep `notify` above every [table] header: TOML is order-sensitive.",
+        f"notify = [{notify}]",
+        "",
+    ]
+    if base:
+        chunks += [base, ""]
+    if trust not in base:  # the user's config may already trust this directory
+        chunks += ["# pre-trust the workdir so no modal eats the first prompt", trust,
+                   'trust_level = "trusted"', ""]
+
+    body = "\n".join(chunks)
+    if not valid_toml(body):
+        warn(
+            f"{agent.name}: ~/.codex/config.toml could not be merged cleanly "
+            "(invalid TOML); writing a minimal config instead"
+        )
+        body = "\n".join(
+            [f"notify = [{notify}]", "", trust, 'trust_level = "trusted"', ""]
+        )
+
     (codex_home / "config.toml").write_text(body)
     return codex_home
 
@@ -759,22 +830,35 @@ def cmd_up(args) -> int:
     if args.no_prompt:
         info("skipping first prompts (--no-prompt)")
     else:
-        # Wait for the slowest CLI to draw its prompt before typing into any of
-        # them, so that an agent told about its peers can reach them right away.
+        # Give the CLIs a moment to draw their splash, then wait for each one's
+        # input box to actually respond before typing a prompt into it.
         boot = max(a.boot_delay_ms for a in started)
-        info(f"waiting {boot}ms for agents to finish booting...")
+        info(f"waiting {boot}ms for agents to boot...")
         sleep_ms(boot)
 
         for agent in started:
             if not agent.first_prompt:
                 continue
             try:
-                paste_into(cfg, agent.session, agent.first_prompt)
+                if agent.ready_probe and not wait_until_ready(cfg, agent):
+                    warn(
+                        f"{agent.name}: input box never responded within "
+                        f"{cfg.ready_timeout_ms}ms; sending the prompt anyway"
+                    )
+                if paste_into(cfg, agent.session, agent.first_prompt):
+                    info(f"sent first prompt to {agent.name}")
+                else:
+                    warn(f"{agent.name}: first prompt may not have been delivered")
                 log_event(cfg, agent.name, "first_prompt", text=agent.first_prompt)
-                info(f"sent first prompt to {agent.name}")
             except SwarmError as exc:
                 warn(f"{agent.name}: could not send first prompt: {exc}")
             sleep_ms(cfg.send_delay_ms)
+
+    # Watchers start last, so they do not mistake a boot banner or the readiness
+    # probe for something the agent said.
+    for agent in started:
+        if agent.capture == "pane":
+            start_watcher(cfg, agent)
 
     print()
     info(f"swarm {cfg.name!r} is up with {len(started)} agent(s)")

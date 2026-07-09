@@ -34,22 +34,22 @@ BUILTIN_AGENT_TYPES: dict[str, dict[str, Any]] = {
     "claude": {
         "command": "claude --dangerously-skip-permissions",
         "capture": "hook",
-        "boot_delay_ms": 5000,
+        "boot_delay_ms": 3000,
     },
     "codex": {
         "command": "codex --yolo",
         "capture": "hook",
-        "boot_delay_ms": 5000,
+        "boot_delay_ms": 3000,
     },
     "gemini": {
         "command": "gemini --yolo",
         "capture": "pane",
-        "boot_delay_ms": 6000,
+        "boot_delay_ms": 4000,
     },
     "hermes": {
         "command": "hermes",
         "capture": "pane",
-        "boot_delay_ms": 5000,
+        "boot_delay_ms": 3000,
     },
 }
 
@@ -66,21 +66,24 @@ Agents you are allowed to message: {peers}
 
 To send a message (preferred -- it is permission-checked and logged), run in your shell:
 
-    swarm send --to <agent> "your message here"
+    swarm send --to AGENT_NAME "MESSAGE TEXT"
 
 To message everyone you are allowed to talk to:
 
-    swarm broadcast "your message here"
+    swarm broadcast "MESSAGE TEXT"
 
 Raw tmux equivalent (works, but bypasses permission checks and logging):
 
-    tmux send-keys -t {prefix}<agent> -l "your message here" && tmux send-keys -t {prefix}<agent> Enter
+    tmux send-keys -t {prefix}AGENT_NAME -l "MESSAGE TEXT" && tmux send-keys -t {prefix}AGENT_NAME Enter
 
 Incoming messages are typed straight into your prompt, prefixed with
 `[swarm] message from <agent>`. Every message is also archived under
 `{inbox}` if you need to re-read one.
 
 Rules:
+  * The commands above are syntax templates. Replace AGENT_NAME with a real
+    agent from the list, and MESSAGE TEXT with what you actually want to say.
+    Never run them verbatim.
   * Only message the agents listed above. Messaging anyone else will be refused.
   * State clearly who you are replying to, and keep messages self-contained --
     the other agent does not see your screen or your files.
