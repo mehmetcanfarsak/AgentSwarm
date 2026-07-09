@@ -1,0 +1,174 @@
+# =============================================================================
+# AgentSwarm example configuration
+#
+#   cp agents.example.yaml agents.yaml
+#   ./swarm.sh validate --show-prompts     # check it without launching anything
+#   ./swarm.sh up                          # launch the swarm
+#
+# Every key is documented inline. Anything marked (optional) can be omitted.
+# =============================================================================
+
+swarm:
+  name: dev-swarm
+
+  # Where agent working directories are created. One folder per agent, named
+  # after the agent. Relative paths resolve against this file's directory.
+  root: ./workspace
+
+  # (optional) Prefix for tmux session names. With `swarm-`, the agent named
+  # `developer` lives in the tmux session `swarm-developer`.
+  session_prefix: ""
+
+  # (optional) Timing knobs, all in milliseconds.
+  send_delay_ms: 150      # pause before pasting text into a pane
+  enter_delay_ms: 250     # pause between pasting text and pressing Enter
+  max_forward_hops: 3     # stops auto-forward loops (A -> B -> A -> ...)
+
+  # (optional) Only used by agents with `capture: pane` (gemini, hermes).
+  pane_idle_ms: 2500      # pane must be unchanged this long to count as "done"
+  pane_poll_ms: 700       # how often the watcher samples the pane
+  pane_scrollback: 400    # lines of scrollback to diff
+
+# -----------------------------------------------------------------------------
+# defaults (optional) -- applied to every agent that does not override them.
+# -----------------------------------------------------------------------------
+defaults:
+  type: claude
+  append_agents_that_you_can_talk_to_prompt: true
+  in_first_prompt_append_your_task_will_be_sent_in_the_next_prompt: false
+  env:
+    SWARM_DEMO: "1"
+
+# -----------------------------------------------------------------------------
+# agent_types (optional) -- override the built-in launch commands, or define
+# entirely new agent types. Built-ins are: claude, codex, gemini, hermes.
+#
+#   capture: how AgentSwarm learns that an agent finished a turn.
+#     hook -- the CLI can run an external program on turn completion.
+#             Supported for claude (Stop hook) and codex (notify program).
+#     pane -- no such facility: poll the tmux pane and diff it. Heuristic.
+#     none -- do not capture at all.
+# -----------------------------------------------------------------------------
+agent_types:
+  claude:
+    command: "claude --dangerously-skip-permissions"
+    capture: hook
+    boot_delay_ms: 5000
+  codex:
+    command: "codex --yolo"
+    capture: hook
+    boot_delay_ms: 5000
+  gemini:
+    command: "gemini --yolo"
+    capture: pane
+    boot_delay_ms: 6000
+  hermes:
+    command: "hermes"
+    capture: pane
+    boot_delay_ms: 5000
+
+# -----------------------------------------------------------------------------
+# agents -- one tmux session and one directory each.
+# -----------------------------------------------------------------------------
+agents:
+
+  - name: orchestrator
+    type: claude
+    # (optional) Override the type's command, e.g. to pin a model.
+    command: "claude --dangerously-skip-permissions --model opus"
+
+    # Who this agent is allowed to message. Use "*" for "everyone else".
+    # An agent that tries to message anyone not listed here is refused.
+    can_talk_to: ["researcher", "developer", "reviewer"]
+
+    first_prompt: |
+      You are the ORCHESTRATOR of a small software team.
+
+      Your job is to break the user's goal into concrete pieces of work, hand
+      each piece to the right specialist, and assemble their answers into a
+      final result. You do not write production code yourself.
+
+      Team:
+        - researcher: investigates prior art, APIs and docs
+        - developer:  writes the implementation
+        - reviewer:   critiques diffs and finds bugs
+
+      Start by asking the researcher what they can find, then brief the developer.
+
+    # This agent is told its task arrives in a follow-up prompt, so it will
+    # acknowledge and wait rather than inventing work.
+    in_first_prompt_append_your_task_will_be_sent_in_the_next_prompt: true
+
+  - name: researcher
+    type: gemini
+    command: "gemini --yolo"
+    can_talk_to: ["orchestrator", "developer"]
+
+    # Whenever this agent finishes a turn, its final message is automatically
+    # relayed to these agents. Every name here must also be in can_talk_to.
+    # Leave it out (the default) to let the agent decide when to speak.
+    forward_responses_to: ["orchestrator"]
+
+    first_prompt: |
+      You are the RESEARCHER. You investigate libraries, APIs, prior art and
+      documentation, then report findings concisely with sources.
+
+      You never write production code. When you have an answer, state it plainly:
+      what exists, what it costs, and what you recommend.
+
+  - name: developer
+    type: codex
+    command: "codex --yolo"
+    can_talk_to: ["orchestrator", "reviewer"]
+
+    # (optional) Per-agent environment variables, exported into its tmux session.
+    env:
+      GIT_AUTHOR_NAME: "swarm-developer"
+
+    first_prompt: |
+      You are the DEVELOPER. You implement what the orchestrator asks for, in
+      the working directory you were started in.
+
+      Write real, runnable code. When you finish a unit of work, send the
+      reviewer a short summary of what you changed and why, and ask for review.
+
+  - name: reviewer
+    type: claude
+    command: "claude --dangerously-skip-permissions"
+    can_talk_to: ["developer", "orchestrator"]
+
+    # (optional) Read the prompt from a file instead of inlining it here.
+    # first_prompt_file: ./prompts/reviewer.md
+    first_prompt: |
+      You are the REVIEWER. You read the developer's changes and hunt for real
+      bugs: wrong logic, unhandled errors, race conditions, security problems.
+
+      Be specific and cite file:line. If a change is fine, say so briefly rather
+      than inventing nitpicks. Report your verdict back to the developer.
+
+  - name: scribe
+    type: hermes
+    command: "hermes"
+
+    # This agent listens only: nobody can be messaged by it, and its own
+    # responses are not captured.
+    can_talk_to: []
+    capture: none
+
+    # Turn off the auto-appended communication block, since it has no peers.
+    append_agents_that_you_can_talk_to_prompt: false
+
+    first_prompt: |
+      You are the SCRIBE. Keep a running changelog of the project in NOTES.md.
+
+# -----------------------------------------------------------------------------
+# templates (optional) -- override the text AgentSwarm appends to first prompts.
+# Available placeholders: {agent} {swarm} {peers} {prefix} {inbox} {workdir}
+# -----------------------------------------------------------------------------
+#
+# templates:
+#   comms: |
+#     You are {agent}. You may message: {peers}.
+#     Send with: swarm send --to <agent> "message"
+#   task_notice: |
+#     Stand by. Your real task arrives in the next message.

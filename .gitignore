@@ -1,0 +1,9 @@
+# Local swarm config (start from agents.example.yaml)
+/agents.yaml
+
+# Agent working directories + swarm runtime state
+/workspace/
+.swarm/
+
+__pycache__/
+*.pyc

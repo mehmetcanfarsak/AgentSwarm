@@ -1,0 +1,210 @@
+# AgentSwarm
+
+> AgentSwarm runs several coding-agent CLIs (Claude Code, Codex, Gemini, Hermes) at once.
+> Each agent gets its own directory and its own tmux session. A single YAML file defines
+> the agents, the command that launches each one, its first prompt, and — as a strict
+> whitelist — which other agents it is allowed to message.
+>
+> This file is the reference for LLMs asked to write or repair an AgentSwarm config.
+> If you are configuring a swarm, everything you need is below. Verify your work with
+> `./swarm.sh validate --show-prompts`, which parses the config and launches nothing.
+
+## Mental model
+
+- One YAML file describes the whole swarm. `./swarm.sh up` reads it and, for each agent:
+  creates `<root>/<name>/`, installs a turn-completion hook in that folder, opens a tmux
+  session named `<session_prefix><name>`, runs the agent's `command` inside the folder,
+  waits `boot_delay_ms`, then types the agent's assembled first prompt into the pane.
+- Agents message each other with `swarm send --to <agent> "text"`. The `swarm` command is
+  on their `PATH` and `SWARM_AGENT` identifies them, so no `--from` is needed. Delivery is
+  refused unless the recipient appears in the sender's `can_talk_to`.
+- A delivered message is pasted into the recipient's pane as
+  `[swarm] message from <sender>:\n<text>`, archived under `.swarm/inbox/<recipient>/`,
+  and written to `.swarm/logs/`.
+
+## Config file
+
+Top level keys: `swarm`, `defaults`, `agent_types`, `agents`, `templates`.
+Only `agents` is required. Relative paths resolve against the config file's directory.
+
+```yaml
+swarm:
+  name: dev-swarm          # label used in prompts/logs; default = config filename
+  root: ./workspace        # parent of the per-agent folders; default ./workspace
+  session_prefix: ""       # prepended to tmux session names; default ""
+  send_delay_ms: 150       # pause before pasting into a pane
+  enter_delay_ms: 250      # pause between pasting and pressing Enter
+  max_forward_hops: 3      # auto-forward loop guard
+  pane_idle_ms: 2500       # quiet time before a `pane` capture counts as a finished turn
+  pane_poll_ms: 700        # pane sampling interval
+  pane_scrollback: 400     # lines of scrollback the pane watcher diffs
+
+defaults:                  # any agent key; applied to agents that omit it
+  type: claude
+  append_agents_that_you_can_talk_to_prompt: true
+
+agent_types:               # override built-ins, or define new types
+  claude:
+    command: "claude --dangerously-skip-permissions"
+    capture: hook
+    boot_delay_ms: 5000
+
+agents:
+  - name: developer        # REQUIRED. Used as the folder name AND the tmux session name.
+                           # Must match ^[A-Za-z0-9_][A-Za-z0-9_-]*$
+    type: codex            # claude | codex | gemini | hermes | any key in agent_types
+    command: "codex --yolo"          # exact CLI invocation; defaults to the type's command
+    can_talk_to: [reviewer]          # whitelist. "*" means every other agent. Default: []
+    first_prompt: |                  # typed in after the CLI boots
+      You are the DEVELOPER...
+    first_prompt_file: ./p.md        # alternative to first_prompt (mutually exclusive)
+    forward_responses_to: [reviewer] # auto-relay finished turns; must ⊆ can_talk_to
+    capture: hook                    # hook | pane | none | auto (default: from type)
+    boot_delay_ms: 5000              # wait before typing the first prompt
+    workdir: ./somewhere             # default <root>/<name>
+    env: {KEY: value}                # extra env vars for its tmux session
+    append_agents_that_you_can_talk_to_prompt: true
+    in_first_prompt_append_your_task_will_be_sent_in_the_next_prompt: false
+
+templates:                 # override the blocks appended to first prompts
+  comms: |                 # placeholders: {agent} {swarm} {peers} {prefix} {inbox} {workdir}
+    You are {agent}. You may message: {peers}.
+  task_notice: |
+    Stand by. Your real task arrives in the next message.
+```
+
+## The two prompt switches
+
+Both are per-agent booleans, both default as shown, and both append to `first_prompt`:
+
+- `append_agents_that_you_can_talk_to_prompt` (default `true`) — appends a block naming
+  the agents this one may message and showing the `swarm send` / `swarm broadcast` / raw
+  `tmux send-keys` syntax. Set it to `false` for an agent with no peers, or when you want
+  to write the communication instructions yourself.
+- `in_first_prompt_append_your_task_will_be_sent_in_the_next_prompt` (default `false`) —
+  appends a "do not start yet, your task arrives in the next prompt" block. Use it for
+  the agent you will drive manually with `swarm send`, so it acknowledges and waits
+  instead of inventing work.
+
+Final prompt order: `first_prompt`, then the comms block, then the task notice.
+
+## capture: how a finished turn is detected
+
+| value | works with | how |
+|---|---|---|
+| `hook` | `claude`, `codex` **only** | the CLI runs a program on turn completion; exact |
+| `pane` | anything | poll the tmux pane and diff it after `pane_idle_ms`; heuristic |
+| `none` | anything | no capture |
+| `auto` | anything | use the agent type's default (this is the default) |
+
+- `claude` → a `Stop` hook in `<agent-dir>/.claude/settings.json`; reads the transcript.
+- `codex` → a private `CODEX_HOME` at `<agent-dir>/.codex/` with a `notify` program.
+- `gemini`, `hermes` → no such facility, so they fall back to `pane`. Setting
+  `capture: hook` on them (or on a custom type) prints a warning and uses `pane`.
+- `pane` capture is terminal scraping. It filters the echo of incoming messages, but
+  spinners and redraws can leak through. When output quality matters, prefer
+  `capture: none` and tell the agent in its prompt to call `swarm send` itself.
+
+`forward_responses_to` requires `capture` to be `hook` or `pane`; combining it with
+`capture: none` is a config error.
+
+## Rules the validator enforces
+
+- agent names are unique and match `^[A-Za-z0-9_][A-Za-z0-9_-]*$`
+- every name in `can_talk_to` and `forward_responses_to` refers to a real agent
+- an agent may not list itself in `can_talk_to`
+- `forward_responses_to` ⊆ `can_talk_to`
+- `forward_responses_to` is empty unless capture is enabled
+- `type` is a built-in or defined under `agent_types`
+- `first_prompt` and `first_prompt_file` are not both set
+
+## Commands
+
+```
+./swarm.sh up [--only a,b] [--restart] [--no-prompt] [--attach]
+./swarm.sh down [--only a,b]
+./swarm.sh restart
+./swarm.sh status
+./swarm.sh attach <agent>
+./swarm.sh send --to <agent> [--from <name>] [--file F] [--force] "message"
+./swarm.sh broadcast "message"
+./swarm.sh inbox <agent> [-n N]
+./swarm.sh logs [agent] [-n N] [-f]
+./swarm.sh validate [--show-prompts]
+```
+
+Config resolution: `-c PATH`, else `$SWARM_CONFIG`, else `./agents.yaml`, else the
+`agents.yaml` beside `swarm.sh`. `./swarm.sh x.yaml` is shorthand for `up -c x.yaml`.
+
+## What an agent sees at runtime
+
+Environment inside every agent's tmux session:
+
+```
+SWARM_AGENT    this agent's name          SWARM_CONFIG   absolute path to the YAML
+SWARM_PEERS    comma-separated can_talk_to SWARM_ROOT    the swarm root directory
+SWARM_SESSION  its tmux session name       SWARM_NAME     the swarm's name
+PATH           has <root>/.swarm/bin first, providing `swarm`
+```
+
+Sending, from inside an agent:
+
+```bash
+swarm send --to reviewer "src/parse.py is ready for review"
+swarm broadcast "I renamed the config module"
+tmux send-keys -t reviewer -l "raw fallback, skips permissions and logging" \
+  && tmux send-keys -t reviewer Enter
+```
+
+Loop guard: a forwarded message carries a hop count that increments on each relay and
+stops at `max_forward_hops`. A message you send with `swarm send` resets it to zero.
+
+## Recipes
+
+**Hub and spoke** — one orchestrator drives specialists, which reply only to it:
+
+```yaml
+agents:
+  - {name: orchestrator, type: claude, can_talk_to: "*",
+     in_first_prompt_append_your_task_will_be_sent_in_the_next_prompt: true}
+  - {name: researcher, type: gemini, can_talk_to: [orchestrator]}
+  - {name: developer,  type: codex,  can_talk_to: [orchestrator]}
+```
+
+**Pipeline** — each stage hands off to the next, automatically:
+
+```yaml
+agents:
+  - {name: spec,   type: claude, can_talk_to: [build], forward_responses_to: [build]}
+  - {name: build,  type: codex,  can_talk_to: [review], forward_responses_to: [review]}
+  - {name: review, type: claude, can_talk_to: []}
+```
+
+**Isolated worker** — runs alone, talks to nobody:
+
+```yaml
+agents:
+  - {name: scribe, type: hermes, can_talk_to: [], capture: none,
+     append_agents_that_you_can_talk_to_prompt: false}
+```
+
+## Gotchas
+
+- A folder and a tmux session are named after each agent; renaming an agent orphans both.
+- Two agents with `forward_responses_to` pointing at each other will relay until the hop
+  limit stops them. Prefer one-directional forwarding, or none.
+- `--dangerously-skip-permissions` / `--yolo` let agents run tools unsupervised. Point
+  `root` at a disposable directory.
+- The first prompt is typed into a live TUI. If an agent's CLI is slow to start, its
+  prompt is lost — raise that agent's `boot_delay_ms`.
+- PyYAML is used when installed; otherwise a bundled subset parser handles the config.
+  It supports block maps/sequences, `|` and `>` scalars, flow `[a, b]` / `{a: 1}`,
+  comments and quoting — but not anchors, aliases, tags or multi-document files.
+
+## Files
+
+- [agents.example.yaml](agents.example.yaml): every option, documented inline.
+- [README.md](README.md): human-facing guide, architecture and troubleshooting.
+- [lib/config.py](lib/config.py): schema, defaults and validation — the source of truth.
+- [lib/swarm.py](lib/swarm.py): tmux orchestration, message routing, capture.
+- [hooks/](hooks/): the Claude `Stop` hook and the Codex `notify` program.
