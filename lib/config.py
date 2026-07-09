@@ -610,10 +610,16 @@ def load(path: str | os.PathLike) -> SwarmConfig:
             "workdir": str(agent.workdir),
         }
         parts = [agent.first_prompt] if agent.first_prompt else []
-        if agent.append_peers_prompt:
-            parts.append(comms_tpl.format(**cfg_get).strip())
-        if agent.append_task_notice:
-            parts.append(notice_tpl.format(**cfg_get).strip())
+        try:
+            if agent.append_peers_prompt:
+                parts.append(comms_tpl.format(**cfg_get).strip())
+            if agent.append_task_notice:
+                parts.append(notice_tpl.format(**cfg_get).strip())
+        except (KeyError, IndexError, ValueError) as exc:
+            raise ConfigError(
+                f"agent {agent.name!r}: a template placeholder is not recognised: {exc}. "
+                f"Available: {', '.join(sorted(cfg_get))}"
+            ) from exc
         agent.first_prompt = "\n\n".join(p.strip() for p in parts if p.strip())
 
     return cfg

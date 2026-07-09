@@ -170,7 +170,7 @@ def busy_info(cfg: SwarmConfig, agent: Agent) -> dict | None:
     if not agent.busy_check:
         return None
     state = turn_state(cfg, agent.name)
-    if state["delivered"] <= state["completed"]:
+    if state.get("delivered", 0) <= state.get("completed", 0):
         return None
 
     age_ms = (time.time() - state.get("since", 0)) * 1000
@@ -188,7 +188,7 @@ def busy_info(cfg: SwarmConfig, agent: Agent) -> dict | None:
 
 def mark_turn_started(cfg: SwarmConfig, agent: str, sender: str) -> None:
     state = turn_state(cfg, agent)
-    state["delivered"] += 1
+    state["delivered"] = state.get("delivered", 0) + 1
     state["since"] = time.time()
     state["by"] = sender
     write_turn_state(cfg, agent, state)
@@ -204,7 +204,7 @@ def mark_turn_finished(cfg: SwarmConfig, agent: str) -> None:
     """
     with file_lock(cfg, agent, "turn.lock"):
         state = turn_state(cfg, agent)
-        state["completed"] = state["delivered"]
+        state["completed"] = state.get("delivered", 0)
         write_turn_state(cfg, agent, state)
 
 
@@ -272,12 +272,16 @@ def enqueue(
     return item_id, depth
 
 
-def drain_queue(cfg: SwarmConfig, agent: Agent) -> None:
-    """Deliver the next queued message, now that the agent has gone idle."""
+def drain_queue(cfg: SwarmConfig, agent: Agent) -> bool:
+    """Deliver the next queued message, now that the agent has gone idle.
+
+    Returns True if one was handed over -- the agent is then busy again, and the
+    rest of the queue waits for its next turn to end.
+    """
     with file_lock(cfg, agent.name, "queue.lock"):
         items = queue_read(cfg, agent.name)
         if not items:
-            return
+            return False
         head = items[0]
         try:
             deliver(
@@ -291,12 +295,13 @@ def drain_queue(cfg: SwarmConfig, agent: Agent) -> None:
                 expects_reply=head.get("expects_reply", True),
             )
         except BusyError:
-            return  # somebody else got there first; try again at the next idle
+            return False  # somebody else got there first; try again at the next idle
         except SwarmError as exc:
             warn(f"{agent.name}: could not deliver queued message: {exc}")
-            return
+            return False
         queue_write(cfg, agent.name, items[1:])
     info(f"{agent.name}: delivered queued message from {head['from']} ({len(items) - 1} left)")
+    return True
 
 
 def session_exists(session: str) -> bool:
@@ -922,7 +927,9 @@ def handle_reply_reminder(
         return
 
     pending = read_pending(cfg, agent.name)
-    owes_reply = bool(pending) and not reached
+    # `from` is absent when the state was written by a send_failed nudge: nobody is
+    # waiting then, so this must not turn into "someone is waiting for your answer".
+    owes_reply = bool(pending and pending.get("from")) and not reached
 
     if not problems and not owes_reply:
         write_pending(cfg, agent.name, None)  # it answered; nothing to chase
@@ -951,13 +958,23 @@ def handle_reply_reminder(
         # rather than telling it that somebody is waiting -- nobody may be.
         template = cfg.send_failed_template
 
-    text = template.format(
-        agent=agent.name,
-        sender=(pending or {}).get("from") or "another agent",
-        id=(pending or {}).get("id") or "",
-        peers=peers,
-        problems=detail,
-    ).strip()
+    fields = {
+        "agent": agent.name,
+        "sender": (pending or {}).get("from") or "another agent",
+        "id": (pending or {}).get("id") or "",
+        "peers": peers,
+        "problems": detail,
+    }
+    try:
+        text = template.format(**fields).strip()
+    except (KeyError, IndexError, ValueError) as exc:
+        warn(f"{agent.name}: reminder template is malformed ({exc}); using the built-in one")
+        default = (
+            cfgmod.DEFAULT_REPLY_REMINDER_TEMPLATE
+            if owes_reply
+            else cfgmod.DEFAULT_SEND_FAILED_TEMPLATE
+        )
+        text = default.format(**fields).strip()
 
     try:
         deliver(cfg, SYSTEM_SENDER, agent.name, text)
@@ -980,8 +997,13 @@ def on_turn_finished(cfg: SwarmConfig, agent: Agent, text: str) -> None:
     # message the agent addressed to one peer is not also broadcast to everybody.
     remainder, reached, problems = route_outbound(cfg, agent, text)
     reached += forward_response(cfg, agent, remainder)
-    handle_reply_reminder(cfg, agent, reached, problems)
-    drain_queue(cfg, agent)
+
+    # Hand over waiting mail before nudging. A reminder is itself a message: sending
+    # it first would mark the agent busy and leave the real message stuck in the
+    # queue. If something was delivered, the agent gets another turn, and we
+    # reconsider the reminder when that one ends.
+    if not drain_queue(cfg, agent):
+        handle_reply_reminder(cfg, agent, reached, problems)
 
 
 def forward_response(cfg: SwarmConfig, agent: Agent, text: str) -> list[str]:
@@ -1535,10 +1557,13 @@ def resume_command(cfg: SwarmConfig, agent: Agent, session_id: str) -> str | Non
     `resume_command` wins, because a command like `bash -ic chy3` invokes the CLI
     through an alias and flags cannot simply be appended to it.
     """
-    if agent.resume_command:
-        return agent.resume_command.format(session_id=session_id, command=agent.command)
-    if agent.resume_args:
-        return f"{agent.command} {agent.resume_args.format(session_id=session_id)}"
+    try:
+        if agent.resume_command:
+            return agent.resume_command.format(session_id=session_id, command=agent.command)
+        if agent.resume_args:
+            return f"{agent.command} {agent.resume_args.format(session_id=session_id)}"
+    except (KeyError, IndexError, ValueError) as exc:
+        warn(f"{agent.name}: resume recipe is malformed ({exc}); starting a fresh conversation")
     return None
 
 

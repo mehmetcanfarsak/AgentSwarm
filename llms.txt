@@ -389,6 +389,8 @@ agents:
 
 ## Files
 
+- [tests/validate.sh](tests/validate.sh): the full suite. Run it after any change; it
+  uses mock agents, so it needs no API key. 48 checks, all must pass.
 - [agents.example.yaml](agents.example.yaml): every option, documented inline.
 - [README.md](README.md): human-facing guide, architecture and troubleshooting.
 - [lib/config.py](lib/config.py): schema, defaults and validation — the source of truth.

@@ -508,6 +508,7 @@ AgentSwarm/
 │   ├── swarm.py            # tmux orchestration, routing, capture
 │   ├── config.py           # schema, defaults, validation
 │   └── minyaml.py          # YAML subset parser, used when PyYAML is absent
+├── tests/validate.sh       # full suite: mock agents, no model calls
 ├── examples/               # research swarm, software company, bug hunt, pairing
 └── workspace/              # created by `up`
     ├── <agent>/            # one folder per agent
@@ -519,6 +520,18 @@ AgentSwarm/
         ├── inbox/<agent>/  # archived messages
         └── run/            # watcher pids, hop counters
 ```
+
+## Tests
+
+```bash
+tests/validate.sh
+```
+
+48 checks over the real code paths — tmux, hooks, locks, queues, the tag parser,
+sessions and resume — driven by mock agents, so it needs no API key and costs
+nothing. It covers the awkward cases: the check-and-set race between concurrent
+senders, a queued message beating a reply reminder, a subagent's sidechain turn
+being skipped, and a transcript read before Claude has flushed it.
 
 ## Troubleshooting
 
