@@ -1,0 +1,72 @@
+# =============================================================================
+# Pair programming on a repository you already have.
+#
+# This example does NOT create any folders. Both agents are started inside one
+# existing checkout, so they see each other's edits immediately -- a driver who
+# writes the code and a navigator who reads it as it lands.
+#
+#   1. Point `workdir` below at a real repository.
+#   2. ./swarm.sh validate -c examples/existing-repo.yaml
+#   3. ./swarm.sh up       -c examples/existing-repo.yaml
+#   4. ./swarm.sh send --to driver "Add retry-with-backoff to the HTTP client."
+#
+# Until you edit the paths, `validate` will refuse to run and tell you so --
+# that is the point of `create_workdir: false`.
+# =============================================================================
+
+swarm:
+  name: pair
+  root: ./pair-runtime      # only holds logs, inboxes and swarm state
+  session_prefix: "pair-"
+
+  # Never silently mkdir a path the user typed. If it does not exist, that is a
+  # typo, not an instruction to create it.
+  create_workdirs: false
+
+defaults:
+  # Both agents share one checkout. Every agent inherits this unless it
+  # overrides `workdir` itself.
+  #
+  #   >>> EDIT ME <<<
+  workdir: ~/projects/acme-api
+
+agents:
+
+  - name: driver
+    type: claude
+    command: "claude --dangerously-skip-permissions"
+    can_talk_to: ["navigator"]
+
+    first_prompt: |
+      You are the DRIVER in a pairing session. You have the keyboard.
+
+      You are working in a real repository that someone cares about. Before you
+      change anything, read enough of it to match its conventions.
+
+      Working agreement:
+        - Make one coherent change at a time, then tell the navigator what you
+          did and why, so they can review it while you continue.
+        - Run the tests before you claim something works. Paste real output.
+        - Never commit, push, or rewrite git history unless explicitly asked.
+        - If the navigator finds a real bug, fix it before moving on.
+
+  - name: navigator
+    type: codex
+    command: "codex --yolo"
+    can_talk_to: ["driver"]
+
+    first_prompt: |
+      You are the NAVIGATOR in a pairing session. You do not have the keyboard.
+
+      You read what the driver writes, in the same working tree, and you think
+      one step ahead of them. Do not edit files -- your job is to catch what
+      they cannot see while typing.
+
+      Watch for:
+        - logic that is wrong on an edge case the tests do not cover
+        - error paths that swallow failures
+        - a change that breaks an existing caller elsewhere in the repo
+        - drifting away from how the rest of this codebase does things
+
+      Report findings to the driver, citing file:line, with the concrete input
+      that goes wrong. If a change looks correct, say so briefly and move on.

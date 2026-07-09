@@ -15,6 +15,11 @@ swarm:
   # after the agent. Relative paths resolve against this file's directory.
   root: ./workspace
 
+  # (optional) Create missing agent folders automatically. Default true.
+  # Set to false to point agents at directories that must already exist, so a
+  # typo in a path fails loudly instead of silently creating an empty folder.
+  create_workdirs: true
+
   # (optional) Prefix for tmux session names. With `swarm-`, the agent named
   # `developer` lives in the tmux session `swarm-developer`.
   session_prefix: ""
@@ -151,6 +156,18 @@ agents:
     type: claude
     command: "claude --dangerously-skip-permissions"
     can_talk_to: ["developer", "orchestrator"]
+
+    # (optional) Run this agent somewhere specific instead of <root>/<name>.
+    # Relative paths resolve against this file. `~` is expanded. The
+    # placeholders {name}, {root}, {swarm} and {type} are substituted, so a
+    # single `defaults.workdir` can serve every agent, e.g. "{root}/{name}-wt".
+    #
+    # Several agents may share one directory (they then see each other's edits;
+    # AgentSwarm warns you). Pair `create_workdir: false` with an existing
+    # project so a bad path is an error, not a new empty folder.
+    #
+    # workdir: ~/projects/acme-api
+    # create_workdir: false
 
     # (optional) Read the prompt from a file instead of inlining it here.
     # first_prompt_file: ./prompts/reviewer.md

@@ -778,7 +778,15 @@ def session_env(cfg: SwarmConfig, agent: Agent, extra: dict[str, str]) -> dict[s
 
 
 def start_agent(cfg: SwarmConfig, agent: Agent) -> None:
-    agent.workdir.mkdir(parents=True, exist_ok=True)
+    if not agent.workdir.is_dir():
+        if not agent.create_workdir:
+            raise SwarmError(
+                f"{agent.name}: workdir does not exist: {agent.workdir} "
+                "(create_workdir is false)"
+            )
+        agent.workdir.mkdir(parents=True, exist_ok=True)
+        info(f"{agent.name}: created {agent.workdir}")
+
     extra_env = install_capture(cfg, agent)
     env = session_env(cfg, agent, extra_env)
 
@@ -805,6 +813,8 @@ def cmd_up(args) -> int:
         die("tmux is required but was not found on PATH")
 
     selected = select_agents(cfg, args.only)
+    for message in cfg.warnings:
+        warn(message)
 
     for directory in (cfg.runtime, cfg.log_dir, cfg.inbox_dir, cfg.run_dir, cfg.bin_dir):
         directory.mkdir(parents=True, exist_ok=True)
@@ -1021,6 +1031,8 @@ def cmd_logs(args) -> int:
 
 def cmd_validate(args) -> int:
     cfg = cfgmod.load(args.config)
+    for message in cfg.warnings:
+        warn(message)
     print(f"config ok: {cfg.path}")
     print(f"  swarm:  {cfg.name}")
     print(f"  root:   {cfg.root}")
@@ -1028,9 +1040,13 @@ def cmd_validate(args) -> int:
     for agent in cfg.agents:
         peers = ", ".join(agent.can_talk_to) or "none"
         fwd = ", ".join(agent.forward_responses_to)
+        if agent.workdir.is_dir():
+            state = "exists"
+        else:
+            state = "will be created" if agent.create_workdir else "MISSING"
         print(f"\n  - {agent.name} ({agent.type}, capture={agent.capture})")
         print(f"      command:  {agent.command}")
-        print(f"      workdir:  {agent.workdir}")
+        print(f"      workdir:  {agent.workdir}  [{state}]")
         print(f"      session:  {agent.session}")
         print(f"      talks to: {peers}")
         if fwd:

@@ -31,6 +31,7 @@ Only `agents` is required. Relative paths resolve against the config file's dire
 swarm:
   name: dev-swarm          # label used in prompts/logs; default = config filename
   root: ./workspace        # parent of the per-agent folders; default ./workspace
+  create_workdirs: true    # auto-create missing agent folders; default true
   session_prefix: ""       # prepended to tmux session names; default ""
   send_delay_ms: 150       # pause before pasting into a pane
   enter_delay_ms: 250      # pause between pasting and pressing Enter
@@ -43,6 +44,7 @@ swarm:
 defaults:                  # any agent key; applied to agents that omit it
   type: claude
   append_agents_that_you_can_talk_to_prompt: true
+  workdir: "{root}/{name}" # optional; see "Working directories" below
 
 agent_types:               # override built-ins, or define new types
   claude:
@@ -63,7 +65,8 @@ agents:
     capture: hook                    # hook | pane | none | auto (default: from type)
     boot_delay_ms: 3000              # grace period before probing the input box
     ready_probe: true                # wait for the input box to echo a token first
-    workdir: ./somewhere             # default <root>/<name>
+    workdir: ./somewhere             # default <root>/<name>; see below
+    create_workdir: true             # false => a missing workdir is an error
     env: {KEY: value}                # extra env vars for its tmux session
     append_agents_that_you_can_talk_to_prompt: true
     in_first_prompt_append_your_task_will_be_sent_in_the_next_prompt: false
@@ -74,6 +77,22 @@ templates:                 # override the blocks appended to first prompts
   task_notice: |
     Stand by. Your real task arrives in the next message.
 ```
+
+## Working directories
+
+- Default: each agent gets `<root>/<name>`, created on `up`.
+- `workdir` overrides it. Absolute, relative to the config file, or `~`-prefixed.
+  Placeholders: `{name}` `{root}` `{swarm}` `{type}`.
+- `defaults.workdir` applies to every agent that omits it. Include `{name}` to give
+  each agent its own folder; omit it to put the whole swarm in one directory.
+- `create_workdirs` (swarm-level) and `create_workdir` (per-agent) control creation.
+  Set them to `false` when pointing at real repositories, so a mistyped path is an
+  error rather than a new empty folder.
+- Several agents may share one workdir. That is legitimate (pair programming in one
+  checkout) but they will overwrite each other's files and interleave git commits,
+  so `validate` and `up` print a warning.
+- `root` always holds `.swarm/` (logs, inboxes, the `swarm` shim), even when every
+  agent works elsewhere.
 
 ## The two prompt switches
 
@@ -161,6 +180,18 @@ tmux send-keys -t reviewer -l "raw fallback, skips permissions and logging" \
 Loop guard: a forwarded message carries a hop count that increments on each relay and
 stops at `max_forward_hops`. A message you send with `swarm send` resets it to zero.
 
+## Worked examples in this repo
+
+- `examples/research-swarm.yaml` — hub and spoke: a lead delegates to a scout
+  (gemini), an analyst (codex) and a writer; the writer uses a custom `workdir`.
+- `examples/software-company.yaml` — six agents across all four CLIs with a
+  restricted comms graph (developers talk to the architect and QA, never to
+  each other).
+- `examples/bug-hunt.yaml` — a hands-free pipeline built on `forward_responses_to`:
+  reproduce → diagnose → fix → verify.
+- `examples/existing-repo.yaml` — two agents pairing inside one existing checkout,
+  using `create_workdirs: false` so a wrong path fails instead of being created.
+
 ## Recipes
 
 **Hub and spoke** — one orchestrator drives specialists, which reply only to it:
@@ -210,6 +241,8 @@ agents:
 ## Gotchas
 
 - A folder and a tmux session are named after each agent; renaming an agent orphans both.
+- Pointing several agents at one `workdir` is allowed and warned about; they share a
+  filesystem and a git index, so they can clobber each other.
 - Two agents with `forward_responses_to` pointing at each other will relay until the hop
   limit stops them. Prefer one-directional forwarding, or none.
 - `--dangerously-skip-permissions` / `--yolo` let agents run tools unsupervised. Point

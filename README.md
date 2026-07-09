@@ -66,6 +66,42 @@ Watch the traffic between agents:
 `session_prefix`). The agent's CLI is launched inside that folder, so its file
 operations are naturally scoped to it.
 
+### Working directories
+
+By default every agent gets a fresh folder under `root`, created for you. You can
+override that per agent, or for the whole swarm via `defaults`:
+
+```yaml
+swarm:
+  root: ./workspace
+  create_workdirs: true          # auto-create missing folders (default)
+
+agents:
+  - name: developer              # -> ./workspace/developer  (created)
+
+  - name: reviewer
+    workdir: ~/projects/acme-api # -> an existing checkout
+    create_workdir: false        # ...and fail loudly if it is not there
+
+  - name: scribe
+    workdir: "{root}/{name}-notes"   # {name} {root} {swarm} {type}
+```
+
+- **`workdir`** may be absolute, relative to the config file, or use `~`.
+- **`create_workdir: false`** turns a missing folder into an error instead of a
+  new empty directory — the right setting when you are pointing agents at real
+  repositories, where a typo should not silently create `~/projcets/acme-api`.
+- **`defaults.workdir`** applies to every agent that does not override it. With
+  a `{name}` placeholder it lays out a folder each; without one, every agent
+  shares a single directory.
+- **Sharing is allowed and sometimes the point** (a driver and a navigator in one
+  checkout), but agents then overwrite each other's files and interleave commits,
+  so `validate` and `up` warn when it happens. See
+  [`examples/existing-repo.yaml`](examples/existing-repo.yaml).
+
+`root` is still used even when every agent lives elsewhere: it holds `.swarm/`
+with the logs, inboxes and the `swarm` shim.
+
 **Prompts are typed in, not piped.** `swarm up` drops each first prompt into the
 agent's input box with a tmux bracketed paste, as one block, then presses Enter.
 That is why multi-line prompts survive intact instead of being submitted line by
@@ -169,6 +205,7 @@ Machine-readable summary for agents: [`llms.txt`](llms.txt).
 |---|---|---|
 | `name` | config filename | Label used in prompts and logs |
 | `root` | `./workspace` | Where per-agent folders are created |
+| `create_workdirs` | `true` | Auto-create missing agent folders |
 | `session_prefix` | `""` | Prepended to every tmux session name |
 | `send_delay_ms` | `150` | Pause before pasting into a pane |
 | `enter_delay_ms` | `250` | Pause between pasting and pressing Enter |
@@ -194,7 +231,8 @@ Machine-readable summary for agents: [`llms.txt`](llms.txt).
 | `capture` | from type | `hook`, `pane`, `none`, or `auto` |
 | `boot_delay_ms` | from type | Grace period before probing the input box (not a delivery guarantee) |
 | `ready_probe` | `true` | Wait for the input box to echo a token before typing |
-| `workdir` | `<root>/<name>` | Override the agent's directory |
+| `workdir` | `<root>/<name>` | Override the agent's directory (`~`, `{name}`, `{root}`, `{swarm}`, `{type}`) |
+| `create_workdir` | from `create_workdirs` | Create the folder if missing, else error |
 | `env` | `{}` | Extra environment variables for its tmux session |
 
 ### `agent_types:`
@@ -213,12 +251,33 @@ agent_types:
 
 ### `defaults:` and `templates:`
 
-`defaults:` supplies any agent key for agents that don't set it. `templates:`
+`defaults:` supplies any agent key for agents that don't set it, including
+`workdir` — useful for putting a whole swarm in one repository. `templates:`
 overrides the two blocks appended to first prompts — `comms` and `task_notice` —
 with `{agent} {swarm} {peers} {prefix} {inbox} {workdir}` available as
 placeholders.
 
 ---
+
+## Examples
+
+Ready-to-run swarms in [`examples/`](examples/):
+
+| File | Shape | Shows off |
+|---|---|---|
+| [`research-swarm.yaml`](examples/research-swarm.yaml) | Hub and spoke | A lead delegating to a scout, an analyst and a writer; a custom output folder |
+| [`software-company.yaml`](examples/software-company.yaml) | Org chart | Six agents across all four CLIs, with a deliberately restricted comms graph |
+| [`bug-hunt.yaml`](examples/bug-hunt.yaml) | Pipeline | `forward_responses_to` chaining reproduce → diagnose → fix → verify, hands-free |
+| [`existing-repo.yaml`](examples/existing-repo.yaml) | Pairing | Two agents in one **existing** checkout, with `create_workdirs: false` |
+
+```bash
+./swarm.sh validate -c examples/research-swarm.yaml   # look before you leap
+./swarm.sh up       -c examples/research-swarm.yaml
+./swarm.sh send --to lead "Research the state of WebGPU compute shaders."
+```
+
+`existing-repo.yaml` intentionally refuses to start until you point `workdir` at
+a repository that exists.
 
 ## Commands
 
@@ -252,6 +311,7 @@ AgentSwarm/
 │   ├── swarm.py            # tmux orchestration, routing, capture
 │   ├── config.py           # schema, defaults, validation
 │   └── minyaml.py          # YAML subset parser, used when PyYAML is absent
+├── examples/               # research swarm, software company, bug hunt, pairing
 └── workspace/              # created by `up`
     ├── <agent>/            # one folder per agent
     └── .swarm/

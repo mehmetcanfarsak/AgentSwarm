@@ -134,6 +134,7 @@ class SwarmConfig:
     pane_idle_ms: int = 2500
     pane_poll_ms: int = 700
     pane_scrollback: int = 400
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def runtime(self) -> Path:
@@ -413,9 +414,35 @@ def load(path: str | os.PathLike) -> SwarmConfig:
                 "(set capture: hook or capture: pane)"
             )
 
+    # Pass 2b: working directories. They may be auto-created under `root`, or
+    # point at an existing project -- possibly one shared by several agents.
+    warnings: list[str] = []
+    for agent in agents:
+        if agent.workdir.exists() and not agent.workdir.is_dir():
+            raise ConfigError(
+                f"agent {agent.name!r}: workdir is not a directory: {agent.workdir}"
+            )
+        if not agent.workdir.exists() and not agent.create_workdir:
+            raise ConfigError(
+                f"agent {agent.name!r}: workdir does not exist: {agent.workdir}\n"
+                "   Create it yourself, or allow AgentSwarm to: create_workdir: true"
+            )
+
+    shared: dict[Path, list[str]] = {}
+    for agent in agents:
+        shared.setdefault(agent.workdir.resolve(), []).append(agent.name)
+    for directory, names in shared.items():
+        if len(names) > 1:
+            warnings.append(
+                f"agents {', '.join(names)} share the working directory {directory} -- "
+                "they can overwrite each other's files, and a shared git checkout will "
+                "interleave their commits"
+            )
+
     cfg = SwarmConfig(
         path=cfg_path,
         name=swarm_name,
+        warnings=warnings,
         root=root,
         session_prefix=prefix,
         agents=agents,
