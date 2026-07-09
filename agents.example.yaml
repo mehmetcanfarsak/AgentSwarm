@@ -35,6 +35,29 @@ swarm:
   # AgentSwarm waits for the input box to echo a throwaway token before typing.
   ready_timeout_ms: 60000
 
+  # (optional) An agent is "busy" from when a message is submitted to it until its
+  # next captured turn end; senders are refused meanwhile and told to --queue or
+  # --wait. If a capture never fires (crashed CLI, bad hook) the agent would look
+  # busy forever, so after this long it is treated as idle again, with a warning.
+  busy_timeout_ms: 900000
+
+  # (optional) How messages look on the wire.
+  #   tagged -- messages arrive inside <swarm-message from=".." id=".."> ... </swarm-message>,
+  #             and an agent sends one by writing <swarm-send to="..."> ... </swarm-send>
+  #             in its reply. No shell quoting, so multi-line bodies survive intact.
+  #   plain  -- the older "[swarm] message from <sender>:" header.
+  message_format: tagged
+
+  # (optional) An agent that answers a question as plain prose sends nothing: only a
+  # <swarm-send> block is delivered. When it owes a reply and its turn ends without
+  # one, AgentSwarm messages it explaining how to send. This is how many times.
+  max_reply_reminders: 1
+
+  # (optional) Reattach agents to their previous conversations on `up`, using the ids
+  # recorded in <root>/.swarm/sessions.yaml. Same as passing `up --resume` every time.
+  # Useful after a reboot. `up --no-resume` overrides it.
+  resume: false
+
   # (optional) Only used by agents with `capture: pane` (gemini, hermes).
   pane_idle_ms: 2500      # pane must be unchanged this long to count as "done"
   pane_poll_ms: 700       # how often the watcher samples the pane
@@ -144,6 +167,26 @@ agents:
     # for the input box to echo it back. Defaults to true; turn it off only for
     # a command that is not an interactive TUI.
     ready_probe: true
+
+    # (optional) Refuse incoming messages while this agent is mid-turn, so a second
+    # agent is told "developer is busy, --queue it or --wait" instead of interrupting.
+    # Needs a capture to know when a turn ends; forced off when capture: none.
+    busy_check: true
+
+    # (optional) Read <swarm-send> blocks out of this agent's replies and deliver
+    # them. Needs a capture; forced off when capture: none or message_format: plain.
+    parse_outbound_tags: true
+
+    # (optional) Nudge this agent when it owes a reply but sent nothing, or when the
+    # block it wrote could not be delivered. Off when its tags are not parsed.
+    reply_reminder: true
+
+    # (optional) How to reattach this agent to a previous conversation. `resume_args`
+    # is appended to `command`; `resume_command` replaces it outright, which you need
+    # when the command goes through an alias or wrapper. {session_id} is substituted.
+    #
+    # resume_args: "resume {session_id}"                       # -> codex --yolo resume <id>
+    # resume_command: "bash -ic 'mywrapper --resume {session_id}'"
 
     first_prompt: |
       You are the DEVELOPER. You implement what the orchestrator asks for, in

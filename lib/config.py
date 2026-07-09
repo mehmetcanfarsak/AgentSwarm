@@ -21,6 +21,11 @@ except ImportError:  # pragma: no cover
         return _yaml.load(text)
 
 
+def parse_yaml(text: str):
+    """Parse YAML with PyYAML if present, otherwise the bundled subset parser."""
+    return _parse_yaml(text)
+
+
 class ConfigError(Exception):
     pass
 
@@ -35,16 +40,20 @@ BUILTIN_AGENT_TYPES: dict[str, dict[str, Any]] = {
         "command": "claude --dangerously-skip-permissions",
         "capture": "hook",
         "boot_delay_ms": 3000,
+        # Appended to `command` by `up --resume`. {session_id} is the recorded id.
+        "resume_args": "--resume {session_id}",
     },
     "codex": {
         "command": "codex --yolo",
         "capture": "hook",
         "boot_delay_ms": 3000,
+        "resume_args": "resume {session_id}",
     },
     "gemini": {
         "command": "gemini --yolo",
         "capture": "pane",
         "boot_delay_ms": 4000,
+        # No session id is recoverable from a scraped pane, so no resume recipe.
     },
     "hermes": {
         "command": "hermes",
@@ -55,6 +64,8 @@ BUILTIN_AGENT_TYPES: dict[str, dict[str, Any]] = {
 
 VALID_CAPTURE = ("hook", "pane", "none", "auto")
 
+VALID_MESSAGE_FORMATS = ("tagged", "plain")
+
 NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")
 
 DEFAULT_COMMS_TEMPLATE = """\
@@ -64,31 +75,103 @@ DEFAULT_COMMS_TEMPLATE = """\
 You are the agent **{agent}** in the "{swarm}" swarm.
 Agents you are allowed to message: {peers}
 
-To send a message (preferred -- it is permission-checked and logged), run in your shell:
+### Receiving
 
-    swarm send --to AGENT_NAME "MESSAGE TEXT"
+Messages arrive in your prompt inside a tag, so you can always tell where one
+starts and ends:
 
-To message everyone you are allowed to talk to:
+    <swarm-message from="SOMEONE" id="m-1a2b3c">
+    the message body,
+    which may span many lines
+    </swarm-message>
 
-    swarm broadcast "MESSAGE TEXT"
-
-Raw tmux equivalent (works, but bypasses permission checks and logging):
-
-    tmux send-keys -t {prefix}AGENT_NAME -l "MESSAGE TEXT" && tmux send-keys -t {prefix}AGENT_NAME Enter
-
-Incoming messages are typed straight into your prompt, prefixed with
-`[swarm] message from <agent>`. Every message is also archived under
+Note the `id`. Quote it as `reply-to` when you answer, so the other agent knows
+which of its questions you are answering. Every message is also archived under
 `{inbox}` if you need to re-read one.
 
-Rules:
-  * The commands above are syntax templates. Replace AGENT_NAME with a real
-    agent from the list, and MESSAGE TEXT with what you actually want to say.
-    Never run them verbatim.
+### Sending
+
+To send a message, write this block **in your reply**. It is read as soon as your
+turn ends, then delivered. Do not escape or quote the body -- write it literally,
+across as many lines as you need:
+
+    <swarm-send to="AGENT_NAME" reply-to="m-1a2b3c">
+    Your message. Multiple lines, code blocks and quotes are all fine.
+    </swarm-send>
+
+To reach everyone you are allowed to talk to, use `<swarm-broadcast>` with no `to`.
+
+The `reply-to` attribute is optional; drop it when you are starting a new thread.
+Quoting it also tells the swarm your message is an answer, so the other agent is not
+chased for a reply to it. For an announcement that needs no answer, either use
+`<swarm-broadcast>` or add `expects-reply="false"`.
+
+You may also send from your shell, which is useful mid-task rather than at the
+end of a turn (but you must then quote the text yourself):
+
+    swarm send --to AGENT_NAME "MESSAGE TEXT"
+    swarm broadcast "MESSAGE TEXT"
+
+### When the other agent is busy
+
+An agent already working on a task will refuse your message. That is normal. A
+tagged `<swarm-send>` is queued for them automatically. From the shell you choose:
+
+    swarm send --to AGENT_NAME --queue "MESSAGE TEXT"   # delivered when they are free
+    swarm send --to AGENT_NAME --wait  "MESSAGE TEXT"   # block until they are free
+    swarm queue AGENT_NAME                              # see what is waiting for them
+
+Prefer queueing, then get on with other work. Never spin in a retry loop.
+
+### Rules
+
+  * `AGENT_NAME`, `MESSAGE TEXT` and `m-1a2b3c` above are placeholders. Replace
+    them with a real agent from the list and what you actually want to say. A
+    `<swarm-send>` addressed to a name that is not an agent is discarded.
   * Only message the agents listed above. Messaging anyone else will be refused.
-  * State clearly who you are replying to, and keep messages self-contained --
-    the other agent does not see your screen or your files.
-  * Do not message an agent just to acknowledge; only send a message when you
-    have a question, a result, or a handoff.
+  * Keep messages self-contained -- the other agent does not see your screen,
+    your files, or your reasoning.
+  * Do not message an agent merely to acknowledge. Send when you have a question,
+    a result, or a handoff.
+  * If someone messages you and your turn ends without a `<swarm-send>` block, your
+    answer reaches nobody. You will get one automatic reminder; after that the
+    sender is left waiting. Answer inside the block the first time.
+"""
+
+DEFAULT_REPLY_REMINDER_TEMPLATE = """\
+Your last turn sent no message to anyone, and {sender} is waiting on your answer
+to message {id}.
+
+{problems}
+
+Anything you write outside a message block stays on your own screen. The other
+agent cannot see your reasoning, your files, or your reply. To actually send it,
+put your answer inside a block exactly like this:
+
+<swarm-send to="{sender}" reply-to="{id}">
+your answer here, over as many lines as you need
+</swarm-send>
+
+Agents you may message: {peers}
+
+If you already wrote the answer, write it again inside that block. If you
+deliberately have nothing to send, ignore this -- you will not be reminded again.
+"""
+
+DEFAULT_SEND_FAILED_TEMPLATE = """\
+Your last turn tried to send a message, but it could not be delivered.
+
+{problems}
+
+Fix it and send again. The block must look exactly like this, closing tag included:
+
+<swarm-send to="AGENT_NAME">
+your message here
+</swarm-send>
+
+Agents you may message: {peers}
+
+You will not be reminded again.
 """
 
 DEFAULT_TASK_NOTICE_TEMPLATE = """\
@@ -118,6 +201,11 @@ class Agent:
     append_task_notice: bool = False
     ready_probe: bool = True
     create_workdir: bool = True
+    busy_check: bool = True
+    parse_outbound_tags: bool = True
+    reply_reminder: bool = True
+    resume_args: str | None = None
+    resume_command: str | None = None
 
 
 @dataclass
@@ -131,6 +219,12 @@ class SwarmConfig:
     send_delay_ms: int = 150
     max_forward_hops: int = 3
     ready_timeout_ms: int = 60000
+    busy_timeout_ms: int = 900000
+    message_format: str = "tagged"
+    max_reply_reminders: int = 1
+    resume: bool = False
+    reply_reminder_template: str = DEFAULT_REPLY_REMINDER_TEMPLATE
+    send_failed_template: str = DEFAULT_SEND_FAILED_TEMPLATE
     pane_idle_ms: int = 2500
     pane_poll_ms: int = 700
     pane_scrollback: int = 400
@@ -155,6 +249,11 @@ class SwarmConfig:
     @property
     def bin_dir(self) -> Path:
         return self.runtime / "bin"
+
+    @property
+    def sessions_file(self) -> Path:
+        """Where each agent's conversation id is recorded, so `up --resume` works."""
+        return self.runtime / "sessions.yaml"
 
     def get(self, name: str) -> Agent:
         for agent in self.agents:
@@ -221,6 +320,8 @@ def load(path: str | os.PathLike) -> SwarmConfig:
     templates = data.get("templates") or {}
     comms_tpl = templates.get("comms") or DEFAULT_COMMS_TEMPLATE
     notice_tpl = templates.get("task_notice") or DEFAULT_TASK_NOTICE_TEMPLATE
+    reminder_tpl = templates.get("reply_reminder") or DEFAULT_REPLY_REMINDER_TEMPLATE
+    failed_tpl = templates.get("send_failed") or DEFAULT_SEND_FAILED_TEMPLATE
 
     # Agent type registry: built-ins, overridable and extensible from YAML.
     types: dict[str, dict[str, Any]] = {
@@ -239,6 +340,12 @@ def load(path: str | os.PathLike) -> SwarmConfig:
     prefix = str(swarm.get("session_prefix") or "")
     swarm_name = str(swarm.get("name") or cfg_path.stem)
     create_workdirs = _as_bool(swarm.get("create_workdirs"), True, "swarm.create_workdirs")
+
+    message_format = str(swarm.get("message_format") or "tagged")
+    if message_format not in VALID_MESSAGE_FORMATS:
+        raise ConfigError(
+            f"swarm.message_format must be one of {', '.join(VALID_MESSAGE_FORMATS)}"
+        )
 
     raw_agents = data.get("agents")
     if not raw_agents:
@@ -356,6 +463,32 @@ def load(path: str | os.PathLike) -> SwarmConfig:
                 ),
                 env=env,
                 create_workdir=create_workdir,
+                # Busy tracking needs a "turn finished" signal, which only exists
+                # when the agent is captured. capture: none => always accept mail.
+                busy_check=_as_bool(
+                    raw.get("busy_check", defaults.get("busy_check")),
+                    True,
+                    f"agent {name}: busy_check",
+                )
+                and capture != "none",
+                # Routing <swarm-send> blocks means reading what the agent said,
+                # which is exactly what capture provides.
+                parse_outbound_tags=_as_bool(
+                    raw.get("parse_outbound_tags", defaults.get("parse_outbound_tags")),
+                    True,
+                    f"agent {name}: parse_outbound_tags",
+                )
+                and capture != "none"
+                and message_format == "tagged",
+                # Reminding an agent to use the tags only makes sense if we read
+                # them back and can see that it did not.
+                reply_reminder=_as_bool(
+                    raw.get("reply_reminder", defaults.get("reply_reminder")),
+                    True,
+                    f"agent {name}: reply_reminder",
+                ),
+                resume_args=raw.get("resume_args", tconf.get("resume_args")),
+                resume_command=raw.get("resume_command", tconf.get("resume_command")),
                 ready_probe=_as_bool(
                     raw.get("ready_probe", defaults.get("ready_probe")),
                     True,
@@ -418,6 +551,11 @@ def load(path: str | os.PathLike) -> SwarmConfig:
     # point at an existing project -- possibly one shared by several agents.
     warnings: list[str] = []
     for agent in agents:
+        # No tag parsing means no way to know whether it replied.
+        if not agent.parse_outbound_tags:
+            agent.reply_reminder = False
+
+    for agent in agents:
         if agent.workdir.exists() and not agent.workdir.is_dir():
             raise ConfigError(
                 f"agent {agent.name!r}: workdir is not a directory: {agent.workdir}"
@@ -450,6 +588,12 @@ def load(path: str | os.PathLike) -> SwarmConfig:
         send_delay_ms=int(swarm.get("send_delay_ms", 150)),
         max_forward_hops=int(swarm.get("max_forward_hops", 3)),
         ready_timeout_ms=int(swarm.get("ready_timeout_ms", 60000)),
+        busy_timeout_ms=int(swarm.get("busy_timeout_ms", 900000)),
+        message_format=message_format,
+        max_reply_reminders=int(swarm.get("max_reply_reminders", 1)),
+        resume=_as_bool(swarm.get("resume"), False, "swarm.resume"),
+        reply_reminder_template=reminder_tpl,
+        send_failed_template=failed_tpl,
         pane_idle_ms=int(swarm.get("pane_idle_ms", 2500)),
         pane_poll_ms=int(swarm.get("pane_poll_ms", 700)),
         pane_scrollback=int(swarm.get("pane_scrollback", 400)),

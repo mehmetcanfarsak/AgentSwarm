@@ -118,27 +118,117 @@ Getting that to work reliably against a live TUI took more than a sleep:
   text actually appeared on screen before pressing Enter, and retries if it did
   not. If delivery cannot be confirmed it refuses to press Enter, rather than
   submitting a half-delivered prompt.
-- **Codex opens a "do you trust this directory?" modal** on first run in a new
-  folder, which would eat the first prompt (Enter answers the dialog). The agent's
-  generated `config.toml` pre-trusts its own working directory.
+- **Both CLIs open a "do you trust this folder?" modal** on first run in a new
+  directory, which would eat the first prompt (Enter answers the dialog). Claude
+  does this even under `--dangerously-skip-permissions`. AgentSwarm pre-trusts each
+  agent's workdir: for codex in its generated `config.toml`, for claude by adding
+  `hasTrustDialogAccepted` for that path in `~/.claude.json`.
+- **Both collapse a long paste into a chip** rather than showing the text —
+  `[Pasted text #1 +36 lines]` for claude, `[Pasted Content 2580 chars]` for codex.
+  Delivery verification recognises both.
 
-**Agents talk by messaging each other.** Every agent's session has a `swarm`
-command on its `PATH` and `SWARM_AGENT` in its environment, so from inside any
-agent:
+**Agents talk in tagged messages.** A message arrives inside an envelope, so the
+agent always knows where it starts, where it ends, and who sent it:
+
+```
+<swarm-message from="lead" to="reviewer" id="m-eb4105" reply-to="m-3f9a1c">
+Review finding for ./parse: tokenize() mishandles a trailing backslash.
+
+    printf 'a\' | ./parse
+</swarm-message>
+```
+
+To send one, the agent simply **writes a block in its reply**. The capture hook
+reads it when the turn ends and delivers it — no shell, no quoting, so multi-line
+bodies, code blocks and backslashes survive intact:
+
+```
+<swarm-send to="reviewer" reply-to="m-3f9a1c">
+Please review src/parse.py.
+
+    printf 'a\' | ./parse
+</swarm-send>
+```
+
+`<swarm-broadcast>` (no `to`) reaches everyone the sender may talk to. The `id`
+and `reply-to` attributes let agents thread a conversation instead of guessing
+which question an answer belongs to. Set `message_format: plain` to go back to the
+old `[swarm] message from <sender>:` header, and `parse_outbound_tags: false` to
+stop reading tags out of replies.
+
+Agents can also send from their shell, which is useful mid-task rather than at the
+end of a turn (but then they must quote the text themselves):
 
 ```bash
 swarm send --to reviewer "I finished the parser, please review src/parse.py"
 swarm broadcast "heads up: I renamed the config module"
 ```
 
-`swarm send` checks `can_talk_to` before delivering, archives the message under
-`.swarm/inbox/<recipient>/`, appends to the event log, and pastes it into the
-recipient's tmux pane prefixed with `[swarm] message from <sender>:`.
+Either way the message is permission-checked against `can_talk_to`, archived under
+`.swarm/inbox/<recipient>/`, and written to the event log.
 
 The raw tmux equivalent also works, and bypasses permissions and logging:
 
 ```bash
 tmux send-keys -t reviewer -l "your message" && tmux send-keys -t reviewer Enter
+```
+
+**Agents get reminded when their answer goes nowhere.** A model that was asked a
+question will often just *write the answer as prose* and end its turn — and that
+prose reaches nobody, because only a `<swarm-send>` block is delivered. So when an
+agent owes a reply and finishes a turn without sending one, AgentSwarm messages it:
+
+```
+Your last turn sent no message to anyone, and lead is waiting on your answer to
+message m-c73724.
+...
+<swarm-send to="lead" reply-to="m-c73724">
+your answer here, over as many lines as you need
+</swarm-send>
+```
+
+If instead the agent *tried* to send but the block was malformed, it gets the
+specific diagnosis — unclosed tag, missing `to`, unknown recipient, permission
+denied — so it can correct itself rather than lose the message silently.
+
+It is reminded at most `max_reply_reminders` times (default **1**), then AgentSwarm
+gives up and stops nagging. An agent that auto-forwards via `forward_responses_to`
+is never reminded, since its words did reach someone. Turn it off per agent with
+`reply_reminder: false`.
+
+**Conversations survive a restart.** Each time an agent finishes a turn, its
+conversation id is written to `<root>/.swarm/sessions.yaml`:
+
+```yaml
+agents:
+  lead:
+    session_id: "0c2e47e2-5110-4e69-ae45-69d8492d2084"
+    type: "claude"
+    transcript: "/root/.claude/projects/.../0c2e47e2-....jsonl"
+    updated_at: "2026-07-09T21:00:41+00:00"
+```
+
+If the machine dies, `swarm up --resume` reattaches every agent to its own
+conversation instead of starting a fresh one — it does not re-send the first
+prompt, and it keeps any mail still queued for that agent:
+
+```bash
+./swarm.sh sessions          # what is recorded, and the command that would resume it
+./swarm.sh up --resume       # reattach; agents without a recorded id start fresh
+```
+
+Claude is resumed with `--resume <id>`, codex with `resume <id>`. Set
+`swarm.resume: true` to make it the default, and `--no-resume` to override.
+Gemini and hermes have no recoverable session id (their turns are scraped from
+the terminal), so they always start a fresh conversation, with a warning.
+
+If your command runs the CLI through an alias or wrapper, flags cannot simply be
+appended — give the full recipe:
+
+```yaml
+- name: lead
+  command: "bash -ic chy3"
+  resume_command: "bash -ic 'chy3 --resume {session_id}'"
 ```
 
 **Permissions are a whitelist.** An agent may only message the agents in its
@@ -159,8 +249,13 @@ mechanisms are **not** equally good:
 | `pane` | `gemini`, `hermes` | Poll the tmux pane, diff it once it stops changing | Heuristic — sees rendered text |
 | `none` | any | Nothing is captured | — |
 
-- **claude** → a `Stop` hook is written into `<agent-dir>/.claude/settings.json`.
-  It reads the session transcript and extracts the last assistant message.
+- **claude** → a `Stop` hook is written into `<agent-dir>/.claude/settings.json`,
+  with **no `matcher` key** (`Stop` is not a tool event, and supplying one stops the
+  interactive TUI from ever running the hook). It reads the session transcript.
+  Claude fires the hook *before* flushing the assistant message to that transcript,
+  so AgentSwarm polls it briefly, and only reads text written after the last user
+  message — otherwise a turn would silently capture nothing, or re-relay the
+  previous turn's reply.
 - **codex** → the agent gets a private `CODEX_HOME` at `<agent-dir>/.codex/`
   with a `notify` program wired up (your `~/.codex/auth.json` is symlinked in, so
   it stays logged in, and your existing `config.toml` is carried over). The
@@ -174,6 +269,95 @@ mechanisms are **not** equally good:
   these agents call `swarm send` explicitly.
 
 Set `capture:` per agent to override the default for its type.
+
+### Subagents, parallel work, and busy agents
+
+Coding agents spawn subagents and background tasks. Four things follow from that.
+
+**A subagent that calls `swarm send` speaks as its parent.** Subagents inherit the
+agent's environment, so `SWARM_AGENT` still names the parent and `can_talk_to` is
+enforced against the parent. That is almost always what you want: the swarm sees
+one `developer`, not five anonymous workers.
+
+**Parallel subagents cannot garble each other.** A paste and the Enter that submits
+it are two separate tmux calls, so two senders racing on one pane used to produce
+one Enter submitting two concatenated messages and another submitting nothing.
+Everything that types into a pane now takes a per-recipient lock, so concurrent
+sends queue up instead of interleaving. Different recipients are still messaged in
+parallel.
+
+**A message that arrives while an agent is busy is queued, not lost.** The CLIs
+hold it in their input box and process it when the current tool call finishes —
+codex says so out loud (`Messages to be submitted after next tool call`).
+
+**An agent that ends its turn saying "I'll respond when the subagent finishes"
+gets captured twice.** With `capture: hook`, the Stop/notify hook fires when the
+*agent's* turn ends. Claude's `Task` subagents run inside the turn, so the hook
+waits for them. But work the agent genuinely backgrounds lets the turn end early,
+and then:
+
+- that interim message is captured, and forwarded if `forward_responses_to` is set;
+- when the agent is re-invoked and finishes for real, its answer is captured and
+  forwarded too. The hop counter records the hop at which the agent *received* its
+  last message, so a second response does not consume an extra hop — the real
+  answer is never suppressed by the loop guard.
+
+Subagent chatter never leaks: Claude writes subagent turns into the same transcript
+marked `isSidechain: true`, and the hook skips them, so what gets relayed is the
+agent's own final message rather than whatever a subagent happened to say last.
+
+With `capture: pane` (gemini, hermes) this breaks down. A quiet pane is the only
+"turn finished" signal there is, so a pause while a subagent works looks exactly
+like a completed turn: the interim "I'll respond when it finishes" is captured and
+forwarded, then the real answer is captured separately. Raise `pane_idle_ms` above
+the longest silence you expect, or set `capture: none` and have the agent call
+`swarm send` when it actually has something to say.
+
+### Busy agents and backpressure
+
+If `b` gives `a` a task, `a` is mid-turn. When `c` then tries to task `a` as well,
+the message is refused rather than dropped into a working agent's input box:
+
+```
+$ swarm send --to a "please review my diff"
+xx a is busy right now (working for 42s on a task from b). Please try again after
+   some time, or put your message in the queue and wait for the answer:
+     swarm send --to a --queue "..."   # delivered automatically when a is free
+     swarm send --to a --wait "..."    # block here until a is free
+   Meanwhile you are free to do other work.
+```
+
+So `c` chooses: come back later, `--queue` it and carry on with other work, or
+`--wait` and block. A queued message is delivered by the next capture hook that
+fires for `a`, the moment it goes idle. Agents are told all of this in the
+communication block appended to their first prompt.
+
+```bash
+swarm status          # TURN column: idle / busy 42s / untracked, plus QUEUE depth
+swarm queue a         # what is waiting for a, and who sent it
+swarm queue a --clear # drop it all
+swarm idle a          # force a back to idle, then drain -- if a capture never fired
+```
+
+**This is safe against parallel senders.** The busy check and the "now busy" write
+happen inside the same per-recipient lock as the paste, so two subagents racing to
+message an idle agent cannot both pass the check — one delivers, the other is told
+it is busy. A flag checked and set separately would let both through.
+
+Some honest limits:
+
+- Busy tracking needs a "turn finished" signal, so it only works for agents with
+  `capture: hook` or `capture: pane`. A `capture: none` agent reports `untracked`
+  and always accepts mail.
+- With `capture: pane`, "idle" means "the pane went quiet", which a thinking agent
+  can also look like. Backpressure there is a hint, not a guarantee.
+- A turn started by a human typing directly into the pane is not tracked.
+- If a capture never fires (crashed CLI, misconfigured hook), the agent would look
+  busy forever. After `busy_timeout_ms` (default 15 minutes) it is treated as idle
+  again, with a warning. `swarm idle <agent>` clears it immediately.
+- `--force` and `--ignore-busy` deliver anyway. The agent's CLI will queue the
+  message and handle it after the current tool call, so nothing is lost — you just
+  give up the backpressure.
 
 ### Auto-forwarding
 
@@ -211,6 +395,10 @@ Machine-readable summary for agents: [`llms.txt`](llms.txt).
 | `enter_delay_ms` | `250` | Pause between pasting and pressing Enter |
 | `max_forward_hops` | `3` | Auto-forward loop guard |
 | `ready_timeout_ms` | `60000` | How long to wait for an agent's input box to respond |
+| `busy_timeout_ms` | `900000` | After this, a stuck "busy" agent is treated as idle |
+| `message_format` | `tagged` | `tagged` XML-ish envelopes, or `plain` text headers |
+| `max_reply_reminders` | `1` | How often to remind an agent that its reply reached nobody |
+| `resume` | `false` | Make `up` reattach to recorded conversations by default |
 | `pane_idle_ms` | `2500` | Quiet time before a `pane` turn counts as done |
 | `pane_poll_ms` | `700` | Pane sampling interval |
 | `pane_scrollback` | `400` | Lines of scrollback the watcher diffs |
@@ -231,6 +419,11 @@ Machine-readable summary for agents: [`llms.txt`](llms.txt).
 | `capture` | from type | `hook`, `pane`, `none`, or `auto` |
 | `boot_delay_ms` | from type | Grace period before probing the input box (not a delivery guarantee) |
 | `ready_probe` | `true` | Wait for the input box to echo a token before typing |
+| `busy_check` | `true` | Refuse incoming messages while this agent is mid-turn |
+| `parse_outbound_tags` | `true` | Route `<swarm-send>` blocks the agent writes in its reply |
+| `reply_reminder` | `true` | Remind it when it owes a reply but sent nothing |
+| `resume_args` | from type | Appended to `command` to resume, e.g. `--resume {session_id}` |
+| `resume_command` | — | Full replacement command when flags can't be appended |
 | `workdir` | `<root>/<name>` | Override the agent's directory (`~`, `{name}`, `{root}`, `{swarm}`, `{type}`) |
 | `create_workdir` | from `create_workdirs` | Create the folder if missing, else error |
 | `env` | `{}` | Extra environment variables for its tmux session |
@@ -253,7 +446,8 @@ agent_types:
 
 `defaults:` supplies any agent key for agents that don't set it, including
 `workdir` — useful for putting a whole swarm in one repository. `templates:`
-overrides the two blocks appended to first prompts — `comms` and `task_notice` —
+overrides the text AgentSwarm generates — `comms` and `task_notice` (appended to
+first prompts), plus `reply_reminder` and `send_failed` (the nudges) —
 with `{agent} {swarm} {peers} {prefix} {inbox} {workdir}` available as
 placeholders.
 
@@ -283,13 +477,16 @@ a repository that exists.
 
 | Command | Purpose |
 |---|---|
-| `swarm.sh up` | Start the swarm. `--only a,b`, `--restart`, `--no-prompt`, `--attach` |
+| `swarm.sh up` | Start the swarm. `--only a,b`, `--restart`, `--resume`, `--no-prompt`, `--attach` |
 | `swarm.sh down` | Kill sessions and watchers. `--only a,b` |
 | `swarm.sh restart` | `down` then `up` |
 | `swarm.sh status` | Table of agents, sessions, capture mode, permissions |
 | `swarm.sh attach <agent>` | Attach to an agent's tmux session |
-| `swarm.sh send --to <agent> "msg"` | Deliver a message (`--from`, `--file`, `--force`) |
+| `swarm.sh send --to <agent> "msg"` | Deliver a message (`--from`, `--file`, `--queue`, `--wait`, `--ignore-busy`, `--force`) |
 | `swarm.sh broadcast "msg"` | Message everyone the sender may talk to |
+| `swarm.sh sessions` | Show each agent's recorded conversation id (`--raw`) |
+| `swarm.sh queue <agent>` | Show what is waiting for a busy agent (`--clear`) |
+| `swarm.sh idle <agent>` | Force an agent back to idle, then drain its queue |
 | `swarm.sh inbox <agent>` | Print archived messages |
 | `swarm.sh logs [agent] [-f]` | Event log: prompts, responses, messages |
 | `swarm.sh validate` | Parse the config. `--show-prompts` renders final prompts |
@@ -316,6 +513,7 @@ AgentSwarm/
     ├── <agent>/            # one folder per agent
     └── .swarm/
         ├── state.json      # what `up` started
+    ├── sessions.yaml   # each agent's conversation id, for `up --resume`
         ├── bin/swarm       # the `swarm` command agents call
         ├── logs/           # <agent>.jsonl + swarm.jsonl
         ├── inbox/<agent>/  # archived messages
