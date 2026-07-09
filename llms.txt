@@ -14,7 +14,7 @@
 - One YAML file describes the whole swarm. `./swarm.sh up` reads it and, for each agent:
   creates `<root>/<name>/`, installs a turn-completion hook in that folder, opens a tmux
   session named `<session_prefix><name>`, runs the agent's `command` inside the folder,
-  waits `boot_delay_ms`, then types the agent's assembled first prompt into the pane.
+  waits for its input box to become responsive, then types the assembled first prompt in.
 - Agents message each other with `swarm send --to <agent> "text"`. The `swarm` command is
   on their `PATH` and `SWARM_AGENT` identifies them, so no `--from` is needed. Delivery is
   refused unless the recipient appears in the sender's `can_talk_to`.
@@ -35,6 +35,7 @@ swarm:
   send_delay_ms: 150       # pause before pasting into a pane
   enter_delay_ms: 250      # pause between pasting and pressing Enter
   max_forward_hops: 3      # auto-forward loop guard
+  ready_timeout_ms: 60000  # how long to wait for an agent's input box to respond
   pane_idle_ms: 2500       # quiet time before a `pane` capture counts as a finished turn
   pane_poll_ms: 700        # pane sampling interval
   pane_scrollback: 400     # lines of scrollback the pane watcher diffs
@@ -47,7 +48,7 @@ agent_types:               # override built-ins, or define new types
   claude:
     command: "claude --dangerously-skip-permissions"
     capture: hook
-    boot_delay_ms: 5000
+    boot_delay_ms: 3000
 
 agents:
   - name: developer        # REQUIRED. Used as the folder name AND the tmux session name.
@@ -60,7 +61,8 @@ agents:
     first_prompt_file: ./p.md        # alternative to first_prompt (mutually exclusive)
     forward_responses_to: [reviewer] # auto-relay finished turns; must ⊆ can_talk_to
     capture: hook                    # hook | pane | none | auto (default: from type)
-    boot_delay_ms: 5000              # wait before typing the first prompt
+    boot_delay_ms: 3000              # grace period before probing the input box
+    ready_probe: true                # wait for the input box to echo a token first
     workdir: ./somewhere             # default <root>/<name>
     env: {KEY: value}                # extra env vars for its tmux session
     append_agents_that_you_can_talk_to_prompt: true
@@ -188,6 +190,23 @@ agents:
      append_agents_that_you_can_talk_to_prompt: false}
 ```
 
+## Verified CLI behaviours (do not "simplify" these away)
+
+- Claude Code discards keystrokes for several seconds partway through startup
+  (measured on v2.1.205: t=2s landed, t=6s and t=12s were dropped, t=20s landed).
+  A fixed `boot_delay_ms` cannot fix this, which is why `ready_probe` types a
+  throwaway token until the input box echoes it, and why a paste is verified on
+  screen before Enter is pressed.
+- Codex shows a "do you trust this directory?" modal on first run in a new folder;
+  Enter answers the modal instead of submitting the prompt. The generated
+  `<agent>/.codex/config.toml` pre-trusts the agent's workdir to avoid it.
+- TOML is order-sensitive. In that generated config, `notify` must appear above
+  every `[table]` header, or it becomes `projects.<dir>.notify` and codex never
+  calls it.
+- Claude collapses a long paste into a `[Pasted text #1 +N lines]` chip, so the
+  pasted text never appears verbatim on screen. Delivery checks look for the chip
+  as well as for the tail of the pasted text (the head scrolls out of view).
+
 ## Gotchas
 
 - A folder and a tmux session are named after each agent; renaming an agent orphans both.
@@ -195,8 +214,9 @@ agents:
   limit stops them. Prefer one-directional forwarding, or none.
 - `--dangerously-skip-permissions` / `--yolo` let agents run tools unsupervised. Point
   `root` at a disposable directory.
-- The first prompt is typed into a live TUI. If an agent's CLI is slow to start, its
-  prompt is lost — raise that agent's `boot_delay_ms`.
+- The first prompt is typed into a live TUI. If AgentSwarm reports "could not confirm
+  the text arrived", the CLI is usually stuck behind a modal (login, trust, onboarding);
+  attach to the session and look. Raise `ready_timeout_ms` if it is merely slow.
 - PyYAML is used when installed; otherwise a bundled subset parser handles the config.
   It supports block maps/sequences, `|` and `>` scalars, flow `[a, b]` / `{a: 1}`,
   comments and quoting — but not anchors, aliases, tags or multi-document files.

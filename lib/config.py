@@ -117,6 +117,7 @@ class Agent:
     append_peers_prompt: bool = True
     append_task_notice: bool = False
     ready_probe: bool = True
+    create_workdir: bool = True
 
 
 @dataclass
@@ -236,6 +237,7 @@ def load(path: str | os.PathLike) -> SwarmConfig:
 
     prefix = str(swarm.get("session_prefix") or "")
     swarm_name = str(swarm.get("name") or cfg_path.stem)
+    create_workdirs = _as_bool(swarm.get("create_workdirs"), True, "swarm.create_workdirs")
 
     raw_agents = data.get("agents")
     if not raw_agents:
@@ -305,13 +307,29 @@ def load(path: str | os.PathLike) -> SwarmConfig:
             first_prompt = fp.read_text()
         first_prompt = (first_prompt or "").strip()
 
-        workdir_raw = raw.get("workdir")
+        workdir_raw = raw.get("workdir") or defaults.get("workdir")
         if workdir_raw:
-            workdir = Path(os.path.expanduser(str(workdir_raw)))
+            # {name}, {root} and {swarm} let one `defaults.workdir` serve every agent.
+            try:
+                expanded = str(workdir_raw).format(
+                    name=name, root=str(root), swarm=swarm_name, type=atype
+                )
+            except (KeyError, IndexError) as exc:
+                raise ConfigError(
+                    f"agent {name!r}: unknown placeholder in workdir {workdir_raw!r}: {exc}. "
+                    "Available: {name} {root} {swarm} {type}"
+                ) from exc
+            workdir = Path(os.path.expanduser(expanded))
             if not workdir.is_absolute():
                 workdir = (cfg_path.parent / workdir).resolve()
         else:
             workdir = root / name
+
+        create_workdir = _as_bool(
+            raw.get("create_workdir", defaults.get("create_workdir", create_workdirs)),
+            True,
+            f"agent {name}: create_workdir",
+        )
 
         env = dict(_as_str_map(defaults.get("env"), "defaults.env"))
         env.update(_as_str_map(tconf.get("env"), f"agent_types.{atype}.env"))
@@ -336,6 +354,7 @@ def load(path: str | os.PathLike) -> SwarmConfig:
                     f"agent {name}: forward_responses_to",
                 ),
                 env=env,
+                create_workdir=create_workdir,
                 ready_probe=_as_bool(
                     raw.get("ready_probe", defaults.get("ready_probe")),
                     True,

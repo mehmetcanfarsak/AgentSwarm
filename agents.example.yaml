@@ -24,6 +24,12 @@ swarm:
   enter_delay_ms: 250     # pause between pasting text and pressing Enter
   max_forward_hops: 3     # stops auto-forward loops (A -> B -> A -> ...)
 
+  # (optional) How long to keep probing an agent's input box for a response
+  # before giving up and typing the first prompt anyway. Some CLIs (Claude Code)
+  # silently discard keystrokes for several seconds partway through startup, so
+  # AgentSwarm waits for the input box to echo a throwaway token before typing.
+  ready_timeout_ms: 60000
+
   # (optional) Only used by agents with `capture: pane` (gemini, hermes).
   pane_idle_ms: 2500      # pane must be unchanged this long to count as "done"
   pane_poll_ms: 700       # how often the watcher samples the pane
@@ -48,24 +54,28 @@ defaults:
 #             Supported for claude (Stop hook) and codex (notify program).
 #     pane -- no such facility: poll the tmux pane and diff it. Heuristic.
 #     none -- do not capture at all.
+#
+#   boot_delay_ms: a grace period before AgentSwarm starts probing the input
+#     box. It does NOT need to cover the full startup time -- delivery of the
+#     first prompt is verified and retried, so a small value is fine.
 # -----------------------------------------------------------------------------
 agent_types:
   claude:
     command: "claude --dangerously-skip-permissions"
     capture: hook
-    boot_delay_ms: 5000
+    boot_delay_ms: 3000
   codex:
     command: "codex --yolo"
     capture: hook
-    boot_delay_ms: 5000
+    boot_delay_ms: 3000
   gemini:
     command: "gemini --yolo"
     capture: pane
-    boot_delay_ms: 6000
+    boot_delay_ms: 4000
   hermes:
     command: "hermes"
     capture: pane
-    boot_delay_ms: 5000
+    boot_delay_ms: 3000
 
 # -----------------------------------------------------------------------------
 # agents -- one tmux session and one directory each.
@@ -124,6 +134,11 @@ agents:
     # (optional) Per-agent environment variables, exported into its tmux session.
     env:
       GIT_AUTHOR_NAME: "swarm-developer"
+
+    # (optional) Before typing the first prompt, type a throwaway token and wait
+    # for the input box to echo it back. Defaults to true; turn it off only for
+    # a command that is not an interactive TUI.
+    ready_probe: true
 
     first_prompt: |
       You are the DEVELOPER. You implement what the orchestrator asks for, in

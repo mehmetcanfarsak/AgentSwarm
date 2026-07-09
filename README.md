@@ -66,10 +66,25 @@ Watch the traffic between agents:
 `session_prefix`). The agent's CLI is launched inside that folder, so its file
 operations are naturally scoped to it.
 
-**Prompts are typed in, not piped.** `swarm up` waits for the CLIs to finish
-booting, then uses a tmux bracketed paste to drop the whole first prompt into
-each agent's input box as one block, and presses Enter. That is why multi-line
-prompts survive intact.
+**Prompts are typed in, not piped.** `swarm up` drops each first prompt into the
+agent's input box with a tmux bracketed paste, as one block, then presses Enter.
+That is why multi-line prompts survive intact instead of being submitted line by
+line.
+
+Getting that to work reliably against a live TUI took more than a sleep:
+
+- **Claude Code silently discards keystrokes for several seconds partway through
+  startup.** Measured on v2.1.205: input at t=2s landed, t=6s and t=12s vanished,
+  t=20s landed. A fixed `boot_delay_ms` is therefore a coin flip. Before typing,
+  AgentSwarm types a throwaway token and waits for the input box to echo it back,
+  then erases it (`ready_probe`). Enter is never sent, so nothing is submitted.
+- **Readiness is not monotonic**, so after pasting, AgentSwarm checks that the
+  text actually appeared on screen before pressing Enter, and retries if it did
+  not. If delivery cannot be confirmed it refuses to press Enter, rather than
+  submitting a half-delivered prompt.
+- **Codex opens a "do you trust this directory?" modal** on first run in a new
+  folder, which would eat the first prompt (Enter answers the dialog). The agent's
+  generated `config.toml` pre-trusts its own working directory.
 
 **Agents talk by messaging each other.** Every agent's session has a `swarm`
 command on its `PATH` and `SWARM_AGENT` in its environment, so from inside any
@@ -112,7 +127,10 @@ mechanisms are **not** equally good:
   It reads the session transcript and extracts the last assistant message.
 - **codex** → the agent gets a private `CODEX_HOME` at `<agent-dir>/.codex/`
   with a `notify` program wired up (your `~/.codex/auth.json` is symlinked in, so
-  it stays logged in, and your existing `config.toml` is carried over).
+  it stays logged in, and your existing `config.toml` is carried over). The
+  generated file keeps `notify` above every `[table]` header -- TOML is
+  order-sensitive, and a `notify` written after one silently becomes
+  `projects.<dir>.notify`, which codex never calls.
 - **gemini / hermes** → no turn-completion hook exists, so a background watcher
   samples the pane and emits the new text once it has been quiet for
   `pane_idle_ms`. It filters out the terminal's echo of incoming messages, but
@@ -155,6 +173,7 @@ Machine-readable summary for agents: [`llms.txt`](llms.txt).
 | `send_delay_ms` | `150` | Pause before pasting into a pane |
 | `enter_delay_ms` | `250` | Pause between pasting and pressing Enter |
 | `max_forward_hops` | `3` | Auto-forward loop guard |
+| `ready_timeout_ms` | `60000` | How long to wait for an agent's input box to respond |
 | `pane_idle_ms` | `2500` | Quiet time before a `pane` turn counts as done |
 | `pane_poll_ms` | `700` | Pane sampling interval |
 | `pane_scrollback` | `400` | Lines of scrollback the watcher diffs |
@@ -173,7 +192,8 @@ Machine-readable summary for agents: [`llms.txt`](llms.txt).
 | `in_first_prompt_append_your_task_will_be_sent_in_the_next_prompt` | `false` | Append "stand by, your task is coming next" |
 | `forward_responses_to` | `[]` | Auto-relay finished turns to these agents |
 | `capture` | from type | `hook`, `pane`, `none`, or `auto` |
-| `boot_delay_ms` | from type | How long to wait before typing the first prompt |
+| `boot_delay_ms` | from type | Grace period before probing the input box (not a delivery guarantee) |
+| `ready_probe` | `true` | Wait for the input box to echo a token before typing |
 | `workdir` | `<root>/<name>` | Override the agent's directory |
 | `env` | `{}` | Extra environment variables for its tmux session |
 
@@ -244,8 +264,10 @@ AgentSwarm/
 
 ## Troubleshooting
 
-**A prompt didn't land, or arrived split across lines.** The CLI was still
-booting when AgentSwarm typed into it. Raise `boot_delay_ms` for that agent.
+**"could not confirm the text arrived; NOT pressing Enter".** The agent's input
+box never echoed the prompt, so AgentSwarm refused to submit it. Attach to the
+session to see what state the CLI is in -- usually a modal (login, trust,
+onboarding) is holding focus. Raise `ready_timeout_ms` if the CLI is merely slow.
 
 **An agent says it "cannot message" another.** That is the permission check
 doing its job — add the recipient to the sender's `can_talk_to`.
