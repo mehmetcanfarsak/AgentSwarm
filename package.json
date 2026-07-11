@@ -1,6 +1,6 @@
 {
   "name": "agentainer",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Run a configurable swarm of coding-agent CLIs (Claude Code, Codex, Gemini) in tmux and let them talk to each other.",
   "keywords": [
     "agents",

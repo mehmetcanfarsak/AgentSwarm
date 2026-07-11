@@ -2024,11 +2024,15 @@ def cmd_broadcast(args) -> int:
                 cfg, sender, peer, text,
                 enforce_acl=not args.force,
                 allow_busy=args.force or args.ignore_busy,
+                # A broadcast is an announcement, never a question -- so it must not
+                # saddle every recipient with a reply obligation (and a later nag).
+                # Mirrors the tagged <swarm-broadcast> path in parse_outbound().
+                expects_reply=False,
             )
             info(f"{sender} -> {peer}: delivered")
         except BusyError as exc:
             if args.queue:
-                _, depth = enqueue(cfg, sender, peer, text, hops=0)
+                _, depth = enqueue(cfg, sender, peer, text, hops=0, expects_reply=False)
                 info(f"{sender} -> {peer}: busy, queued at position {depth}")
             else:
                 warn(f"{sender} -> {peer}: {exc.args[0].splitlines()[0]}")

@@ -125,9 +125,50 @@ def _is_balanced(s: str) -> bool:
     return depth <= 0
 
 
+_DQ_ESCAPES = {
+    '"': '"', "\\": "\\", "/": "/", "n": "\n", "t": "\t", "r": "\r",
+    "b": "\b", "f": "\f", "v": "\x0b", "0": "\x00", "a": "\x07", "e": "\x1b",
+}
+
+
+def _unescape_double(body: str) -> str:
+    """Resolve backslash escapes in a double-quoted scalar.
+
+    A plain ``bytes.decode("unicode_escape")`` is latin-1 based and mangles any
+    non-ASCII character (``"café"`` -> ``"cafÃ©"``), so escapes are expanded by
+    hand and every other character -- including multi-byte UTF-8 -- is kept as-is.
+    """
+    out: list[str] = []
+    i, n = 0, len(body)
+    while i < n:
+        ch = body[i]
+        if ch != "\\" or i + 1 >= n:
+            out.append(ch)
+            i += 1
+            continue
+        nxt = body[i + 1]
+        if nxt == "u" and i + 6 <= n:
+            try:
+                out.append(chr(int(body[i + 2 : i + 6], 16)))
+                i += 6
+                continue
+            except ValueError:
+                pass
+        elif nxt == "x" and i + 4 <= n:
+            try:
+                out.append(chr(int(body[i + 2 : i + 4], 16)))
+                i += 4
+                continue
+            except ValueError:
+                pass
+        out.append(_DQ_ESCAPES.get(nxt, nxt))
+        i += 2
+    return "".join(out)
+
+
 def _unquote(s: str) -> str:
     if len(s) >= 2 and s[0] == s[-1] == '"':
-        return s[1:-1].encode("utf-8").decode("unicode_escape")
+        return _unescape_double(s[1:-1])
     if len(s) >= 2 and s[0] == s[-1] == "'":
         return s[1:-1].replace("''", "'")
     return s
