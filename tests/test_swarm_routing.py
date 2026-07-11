@@ -282,6 +282,17 @@ def test_sweep_stale_queues_excludes_self(tmp_path):
     assert all(c.args[1].name != "B" for c in dq.call_args_list)
 
 
+def test_sweep_stale_queues_suppresses_drain_error(tmp_path):
+    cfg = make_cfg(tmp_path)
+    swarm.enqueue(cfg, "A", "B", "stranded", 0)
+    with mock.patch.object(swarm, "busy_info", lambda c, a: None), \
+         mock.patch.object(swarm, "drain_queue", side_effect=swarm.SwarmError("wedged")), \
+         mock.patch.object(swarm, "warn") as warn:
+        # A draining failure must not propagate out of the sweep.
+        swarm.sweep_stale_queues(cfg)
+    assert any("could not drain stranded queue" in str(a) for w in warn.call_args_list for a in w)
+
+
 # --------------------------------------------------------- forward_response
 
 def test_forward_none_configured(tmp_path):

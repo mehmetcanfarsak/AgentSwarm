@@ -60,6 +60,21 @@ An agent's **`type`** selects how a finished turn is detected:
 - `codex` → a **`notify`** program wired into `<workdir>/.codex/config.toml`
 - `gemini` / `hermes` → **pane polling** (`capture` from the terminal)
 
+`capture: none` *removes* this detection. For `claude`/`codex` (which have a hook)
+that leaves the orchestrator blind to a silent turn — exactly the footgun below —
+so `capture: none` on those types is **auto-upgraded to `hook` at load time** (with
+a `validate`/`up` warning). Use `gemini`/`hermes` when you genuinely want
+deliberate, hook-free sending. Note that a `gemini`/`hermes` agent left on
+`capture: none` keeps no completion signal and the supervisor (below) can only
+catch its *dead* session, not an "alive but silent" one.
+
+A **supervisor** background process (started at `up`, `supervise_interval_ms`,
+default 15s; `swarm.supervise: false` disables it) is the heartbeat the
+event-driven design otherwise lacks. Each tick it reconciles stale-busy agents
+(`delivered > completed` past `busy_timeout_ms` → marked idle + queue drained),
+logs and reconciles dead sessions, and re-runs `sweep_stale_queues` — so one
+silent agent cannot wedge the whole swarm. `status` reports whether it is alive.
+
 The hook wiring is baked into the workdir **at `up` time** from `type`. If an
 agent's `command` launches a *different* CLI than its `type` implies (e.g.
 `type: codex` but `command` runs `claude`), completion is never detected: the

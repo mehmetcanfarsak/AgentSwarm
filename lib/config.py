@@ -242,6 +242,8 @@ class SwarmConfig:
     pane_scrollback: int = 400
     tmux_history_limit: int = 50000
     tmux_mouse: bool = True
+    supervise: bool = True
+    supervise_interval_ms: int = 15000
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -370,6 +372,8 @@ def load(path: str | os.PathLike) -> SwarmConfig:
     # Pass 1: materialise agents without resolving peer references.
     agents: list[Agent] = []
     seen: set[str] = set()
+    # Warnings collected while resolving each agent (e.g. capture upgrades).
+    capture_warnings: list[str] = []
     for index, raw in enumerate(raw_agents):
         if not isinstance(raw, dict):
             raise ConfigError(f"agents[{index}]: must be a mapping")
@@ -407,6 +411,19 @@ def load(path: str | os.PathLike) -> SwarmConfig:
             )
         if capture == "auto":
             capture = str(tconf.get("capture") or "pane")
+        # capture: none on a type that HAS a completion hook (claude/codex) removes
+        # the agent's only turn-completion signal and leaves the orchestrator blind
+        # to a silent turn -- which can wedge the whole swarm. Auto-upgrade to the
+        # type's natural capture so the hook keeps the orchestrator informed (and
+        # re-enables busy_check / tag parsing / reply reminders, force-disabled for
+        # capture: none below). gemini/hermes deliberately keep capture: none.
+        if capture == "none" and str(tconf.get("capture")) == "hook":
+            capture = "hook"
+            capture_warnings.append(
+                f"agent {name!r}: capture: none on a {atype} agent gives the "
+                f"orchestrator no turn-completion signal -- auto-upgraded to "
+                f"capture: hook. Use capture: pane (gemini/hermes) for deliberate-send."
+            )
 
         boot = raw.get("boot_delay_ms")
         if boot is None:
@@ -501,8 +518,8 @@ def load(path: str | os.PathLike) -> SwarmConfig:
                     True,
                     f"agent {name}: reply_reminder",
                 ),
-                resume_args=raw.get("resume_args", tconf.get("resume_args")),
-                resume_command=raw.get("resume_command", tconf.get("resume_command")),
+                resume_args=raw.get("resume_args") or defaults.get("resume_args") or tconf.get("resume_args"),
+                resume_command=raw.get("resume_command") or defaults.get("resume_command") or tconf.get("resume_command"),
                 ready_probe=_as_bool(
                     raw.get("ready_probe", defaults.get("ready_probe")),
                     True,
@@ -564,6 +581,7 @@ def load(path: str | os.PathLike) -> SwarmConfig:
     # Pass 2b: working directories. They may be auto-created under `root`, or
     # point at an existing project -- possibly one shared by several agents.
     warnings: list[str] = []
+    warnings.extend(capture_warnings)
     for agent in agents:
         # No tag parsing means no way to know whether it replied.
         if not agent.parse_outbound_tags:
@@ -613,6 +631,8 @@ def load(path: str | os.PathLike) -> SwarmConfig:
         pane_scrollback=int(swarm.get("pane_scrollback", 400)),
         tmux_history_limit=int(swarm.get("tmux_history_limit", 50000)),
         tmux_mouse=_as_bool(swarm.get("tmux_mouse"), True, "swarm.tmux_mouse"),
+        supervise=_as_bool(swarm.get("supervise"), True, "swarm.supervise"),
+        supervise_interval_ms=int(swarm.get("supervise_interval_ms", 15000)),
     )
 
     # Pass 3: build the full first prompt for each agent.

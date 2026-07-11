@@ -8,6 +8,12 @@
 __pycache__/
 *.pyc
 
+# Test coverage data
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+
 # npm
 /node_modules/
 *.tgz

@@ -384,10 +384,6 @@ def pane_text(session: str, scrollback: int = 0) -> str:
         return ""
 
 
-def visible_pane(session: str) -> str:
-    return pane_text(session)
-
-
 def needle_for(body: str) -> str:
     """The *tail* of the text, which is what stays on screen after a paste.
 
@@ -1318,6 +1314,131 @@ def watcher_alive(cfg: SwarmConfig, agent: Agent) -> bool:
         return False
 
 
+# --------------------------------------------------------------------------
+# supervisor: the heartbeat the orchestrator otherwise lacks
+# --------------------------------------------------------------------------
+
+SUPERVISOR_PID = "supervisor.pid"
+
+
+def start_supervisor(cfg: SwarmConfig, names: list[str]) -> None:
+    """Launch the background liveness supervisor for *names* (the agents we started)."""
+    cfg.run_dir.mkdir(parents=True, exist_ok=True)
+    cfg.log_dir.mkdir(parents=True, exist_ok=True)
+    logfile = (cfg.log_dir / "supervisor.log").open("a")
+    # Pass the config via SWARM_CONFIG rather than `-c`: the `supervise` subcommand
+    # is an internal plumbing command and we keep its CLI surface minimal/stable.
+    env = dict(os.environ)
+    env["SWARM_CONFIG"] = str(cfg.path)
+    proc = subprocess.Popen(
+        [sys.executable, str(Path(__file__).resolve()), "supervise", *names],
+        stdout=logfile,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+        env=env,
+        start_new_session=True,
+    )
+    (cfg.run_dir / SUPERVISOR_PID).write_text(str(proc.pid))
+
+
+def stop_supervisor(cfg: SwarmConfig) -> None:
+    pid_file = cfg.run_dir / SUPERVISOR_PID
+    if not pid_file.is_file():
+        return
+    try:
+        pid = int(pid_file.read_text().strip())
+        os.kill(pid, 15)
+    except (OSError, ValueError):
+        pass
+    pid_file.unlink(missing_ok=True)
+
+
+def supervisor_alive(cfg: SwarmConfig) -> bool:
+    pid_file = cfg.run_dir / SUPERVISOR_PID
+    if not pid_file.is_file():
+        return False
+    try:
+        os.kill(int(pid_file.read_text().strip()), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def supervise_once(cfg: SwarmConfig, names: list[str], seen_dead: set[str]) -> None:
+    """One reconciliation pass over the watched agents.
+
+    Split out of the loop so it can be unit-tested without the timer. Reconciles
+    two failure modes that the event-driven design otherwise never notices:
+
+    * a dead tmux session (CLI crashed / killed) -- mark the turn finished and
+      warn; do NOT try to deliver into a pane that no longer exists;
+    * a stale-busy agent (turn `delivered > completed` older than busy_timeout_ms)
+      -- the capture that should have ended the turn never fired, so mark it
+      finished and drain its inbox.
+
+    `seen_dead` is an in-memory set (the supervisor is one long-lived process)
+    so a dead session is warned about once, not every tick.
+    """
+    for name in names:
+        agent = cfg.get(name)
+        if not session_exists(agent.session):
+            if name not in seen_dead:
+                seen_dead.add(name)
+                warn(f"{name}: tmux session gone; treating as finished")
+                log_event(cfg, name, "dead", text="session gone")
+                # Reconcile the turn so the agent is no longer "busy" forever, and
+                # surface any mail that was queued to it (it cannot be delivered to
+                # a dead pane, but the user should know it is stranded).
+                mark_turn_finished(cfg, name)
+                queued = queue_read(cfg, name)
+                if queued:
+                    warn(
+                        f"{name}: {len(queued)} queued message(s) stranded "
+                        f"(recipient session is gone)"
+                    )
+            continue
+        seen_dead.discard(name)
+
+        state = turn_state(cfg, name)
+        if state.get("delivered", 0) <= state.get("completed", 0):
+            continue  # idle or already reconciled; nothing to do
+        age_ms = (time.time() - state.get("since", 0)) * 1000
+        if age_ms <= cfg.busy_timeout_ms:
+            continue  # legitimately mid-turn; its own capture will end it
+        warn(
+            f"{name}: looked busy for {int(age_ms / 1000)}s "
+            f"(over busy_timeout_ms); marking idle and draining its queue"
+        )
+        mark_turn_finished(cfg, name)
+        try:
+            drain_queue(cfg, agent)
+        except SwarmError as exc:
+            warn(f"{name}: could not drain queue: {exc}")
+
+    # Any turn end is an opportunity to rescue mail stranded on an agent whose own
+    # capture never fired -- otherwise a single missed completion wedges its queue.
+    sweep_stale_queues(cfg)
+
+
+def run_supervisor(cfg: SwarmConfig, names: list[str]) -> None:
+    """Background loop: the heartbeat that keeps one silent agent from wedging the swarm.
+
+    The swarm is otherwise purely event-driven -- progress only happens when an
+    agent's capture fires (hook/pane) or a human sends a message. If that event
+    never arrives, nothing wakes the loop. This polls on a timer and reconciles
+    stale/dead state. It self-exits once every watched session is gone (after
+    `down`), so it does not run forever.
+    """
+    info("supervisor started")
+    seen_dead: set[str] = set()
+    while True:
+        sleep_ms(cfg.supervise_interval_ms)
+        if not any(session_exists(cfg.get(n).session) for n in names):
+            info("supervisor: no watched sessions remain, exiting")
+            return
+        supervise_once(cfg, names, seen_dead)
+
+
 READY_TOKEN = "zqxswarmready"
 
 
@@ -1720,6 +1841,7 @@ def cmd_up(args) -> int:
                 continue
             info(f"{agent.name}: restarting")
             stop_watcher(cfg, agent)
+            stop_supervisor(cfg)
             tmux("kill-session", "-t", f"={agent.session}", check=False, capture=True)
 
         resume_cmd = None
@@ -1801,10 +1923,27 @@ def cmd_up(args) -> int:
         if agent.capture == "pane":
             start_watcher(cfg, agent)
 
+    # The supervisor is the heartbeat the event-driven design lacks: it reconciles
+    # dead/stale agents on a timer so one silent agent cannot wedge the swarm.
+    if cfg.supervise and started:
+        start_supervisor(cfg, [a.name for a in started])
+
     print()
     info(f"swarm {cfg.name!r} is up with {len(started)} agent(s)")
     info(f"attach with:  tmux attach -t {started[0].session}")
     info(f"or:           {SWARM_HOME / 'agentainer'} attach {started[0].name}")
+
+    if resumed:
+        example = sorted(resumed)[0]
+        print()
+        info(
+            "resumed agents are reattached to their previous conversation but sit "
+            "idle at their prompt — they will NOT auto-continue on their own."
+        )
+        info(
+            "to make one pick up where it left off, nudge it, e.g.:  "
+            f"agentainer send --to {example} \"Please continue from where you left off.\""
+        )
 
     if args.attach:
         os.execvp("tmux", ["tmux", "attach", "-t", started[0].session])
@@ -1813,6 +1952,10 @@ def cmd_up(args) -> int:
 
 def cmd_down(args) -> int:
     cfg = cfgmod.load(args.config)
+    # Stop the supervisor first (it is not per-agent); if only some agents are
+    # being stopped, the supervisor self-exits once no watched sessions remain.
+    if not args.only:
+        stop_supervisor(cfg)
     for agent in select_agents(cfg, args.only):
         stop_watcher(cfg, agent)
         if session_exists(agent.session):
@@ -1870,6 +2013,9 @@ def cmd_status(args) -> int:
         cells = [str(c).ljust(widths[i]) for i, c in enumerate(row)]
         cells[2] = f"{colour}{cells[2]}\033[0m"
         print("  ".join(cells))
+    sup = "alive" if supervisor_alive(cfg) else "down"
+    print(f"\nsupervisor: {sup}  (reconciles dead/stale agents every "
+          f"{cfg.supervise_interval_ms}ms)")
     return 0
 
 
@@ -2131,6 +2277,13 @@ def cmd_watch(args) -> int:
     return 0
 
 
+def cmd_supervise(args) -> int:
+    cfg = cfgmod.load(args.config) if args.config else cfgmod.load(default_config())
+    names = list(args.names) or [a.name for a in cfg.agents]
+    run_supervisor(cfg, names)
+    return 0
+
+
 def select_agents(cfg: SwarmConfig, only: str | None) -> list[Agent]:
     if not only:
         return list(cfg.agents)
@@ -2265,6 +2418,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_watch = add("watch", cmd_watch, "internal: poll an agent's tmux pane for completed turns")
     p_watch.add_argument("agent")
 
+    p_sup = add("supervise", cmd_supervise, "internal: background liveness watchdog")
+    p_sup.add_argument("names", nargs="*", help="agents to watch (default: all)")
+
     return parser
 
 
@@ -2285,8 +2441,7 @@ def main(argv: list[str] | None = None) -> int:
         die(f"command failed: {exc}")
     except KeyboardInterrupt:
         return 130
-    return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - exercised by running the module as a script
     sys.exit(main())

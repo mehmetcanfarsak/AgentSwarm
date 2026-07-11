@@ -472,6 +472,30 @@ def test_agent_from_cwd(tmp_runtime, tmp_path):
         assert swarm.agent_from_cwd(cfg) == "A"
 
 
+def test_agent_from_cwd_unrelated_dir(tmp_path):
+    cfg = load_swarm(
+        tmp_path,
+        "- {name: A, command: 'true'}\n",
+    )
+    import os
+    with mock.patch.object(os, "getcwd", return_value=str(tmp_path / "nowhere")):
+        # cwd matches no agent workdir -> caller is not an agent.
+        assert swarm.agent_from_cwd(cfg) is None
+
+
+def test_read_transcript_reply_blank_lines(tmp_path):
+    # Blank lines between records must be skipped without breaking the parse.
+    p = tmp_path / "t.jsonl"
+    p.write_text(
+        "\n"
+        '{"type":"user","message":{"content":"q"}}\n'
+        "\n"
+        '{"type":"assistant","message":{"content":"REPLY"}}\n'
+        "\n"
+    )
+    assert swarm.read_transcript_reply(str(p)) == "REPLY"
+
+
 def test_discover_context_explicit(tmp_path, monkeypatch):
     cfg = load_swarm(
         tmp_path,

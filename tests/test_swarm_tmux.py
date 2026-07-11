@@ -295,3 +295,38 @@ def test_run_watcher_skips_tiny_text(tmp_path):
     ) as otf, mock.patch.object(swarm, "log_event"):
         swarm.run_watcher(cfg, agent)
     assert not otf.called
+
+
+def test_run_watcher_emits_partial_change(tmp_path):
+    # When the pane changes to text that shares a prefix with what was already
+    # emitted, the common-prefix loop must break early (line 1536). "line1\nlineA"
+    # and "line1\nlineB" share "line1" but differ at the tail.
+    cfg = load_swarm(tmp_path, "- {name: A, command: 'true'}\n")
+    agent = cfg.get("A")
+    cfg.pane_idle_ms = 0
+    calls = {"cap": 0, "sess": 0}
+
+    def cap(c, a):
+        calls["cap"] += 1
+        if calls["cap"] == 1:
+            return "line1"
+        if calls["cap"] == 2:
+            return "line1\nlineA"  # change -> dirty
+        if calls["cap"] == 3:
+            return "line1\nlineA"  # idle -> emit (tail empty, skipped)
+        return "line1\nlineB"      # change -> shares prefix, tail differs -> break
+
+    def sess(a):
+        calls["sess"] += 1
+        return calls["sess"] < 5
+
+    with mock.patch.object(swarm, "capture_pane", cap), mock.patch.object(
+        swarm, "session_exists", sess
+    ), mock.patch.object(swarm, "read_echo", lambda c, a: set()), mock.patch.object(
+        swarm, "on_turn_finished"
+    ) as otf, mock.patch.object(swarm, "log_event"):
+        swarm.run_watcher(cfg, agent)
+    assert otf.called
+    # The emitted text should be the differing tail, not the shared prefix.
+    text = otf.call_args[0][2]
+    assert "lineB" in text and "line1" not in text

@@ -50,13 +50,40 @@ def test_capture_auto_resolves_from_type(tmp_path):
 def test_explicit_capture_values(tmp_path):
     cfg = load_config(
         "swarm: {root: ./ws}\n"
+        # capture:none on gemini/hermes is honoured (they deliberately keep none).
         "agents:\n"
-        "  - {name: A, command: 'true', capture: none}\n"
+        "  - {name: A, command: 'true', type: gemini, capture: none}\n"
         "  - {name: B, command: 'true', capture: pane}\n"
         "  - {name: C, command: 'true', capture: hook}\n",
         tmp_path,
     )
     assert [a.capture for a in cfg.agents] == ["none", "pane", "hook"]
+
+
+def test_capture_none_on_hook_type_auto_upgrades(tmp_path):
+    # claude/codex agents carry a completion hook; capture:none would blind the
+    # orchestrator, so it is auto-upgraded to the type's natural capture (hook).
+    cfg = load_config(
+        "swarm: {root: ./ws}\n"
+        "agents:\n"
+        "  - {name: A, command: 'true', type: claude, capture: none}\n"
+        "  - {name: C, command: 'true', type: codex, capture: none}\n",
+        tmp_path,
+    )
+    assert cfg.get("A").capture == "hook"
+    assert cfg.get("C").capture == "hook"
+    assert any("auto-upgraded to capture: hook" in w for w in cfg.warnings)
+
+
+def test_capture_none_on_pane_type_stays_none(tmp_path):
+    # gemini's natural capture is pane, so capture:none is NOT upgraded.
+    cfg = load_config(
+        "swarm: {root: ./ws}\n"
+        "agents:\n  - {name: A, command: 'true', type: gemini, capture: none}\n",
+        tmp_path,
+    )
+    assert cfg.get("A").capture == "none"
+    assert not cfg.warnings
 
 
 def test_custom_agent_type(tmp_path):
@@ -351,12 +378,13 @@ def test_forward_not_subset_of_can_talk_to(tmp_path):
 
 
 def test_forward_with_capture_none(tmp_path):
+    # capture:none on a gemini agent is honoured, so forward_responses_to must
+    # still raise (forwarding needs a capture to read the agent's output).
     with pytest.raises(ConfigError):
         load_config(
             "swarm: {root: ./ws}\n"
-            "defaults: {type: claude}\n"
             "agents:\n"
-            "  - {name: A, command: 'true', capture: none, can_talk_to: [B], forward_responses_to: [B]}\n"
+            "  - {name: A, command: 'true', type: gemini, capture: none, can_talk_to: [B], forward_responses_to: [B]}\n"
             "  - {name: B, command: 'true'}\n",
             tmp_path,
         )

@@ -121,6 +121,24 @@ def test_install_codex_hook_merges_user_config(tmp_path, monkeypatch):
     assert 'notify = ["old"]' not in toml  # user's notify is stripped
 
 
+def test_install_codex_hook_symlink_falls_back_to_copy(tmp_path, monkeypatch):
+    # When the user's auth.json cannot be symlinked (e.g. a cross-device link on
+    # some filesystems), install_codex_hook must fall back to copying it.
+    monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path / "home"))
+    user_home = tmp_path / "home" / ".codex"
+    user_home.mkdir(parents=True)
+    (user_home / "auth.json").write_text('{"token": 1}')
+    agent = claude_agent(tmp_path / "agentA", type="codex")
+    agent.workdir.mkdir(parents=True)
+    with mock.patch.object(swarm.os, "symlink", side_effect=OSError("cross-device")), \
+         mock.patch.object(swarm, "valid_toml", return_value=True):
+        path = swarm.install_codex_hook(agent)
+    # Fell back to copy2: the file is present and is a regular file, not a link.
+    dst = path / "auth.json"
+    assert dst.exists()
+    assert not dst.is_symlink()
+
+
 def test_install_codex_hook_trust_already_present(tmp_path, monkeypatch):
     monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path / "home"))
     agent = claude_agent(tmp_path / "agentA", type="codex")
