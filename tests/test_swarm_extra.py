@@ -657,6 +657,35 @@ def test_wait_for_dequeue_timeout_sleeps(tmp_path):
         assert swarm.wait_for_dequeue(cfg, "A", item, 0.02) is False
 
 
+# ----------------------------------------------------------------- read_version
+
+def test_read_version_reads_package_json(tmp_path, monkeypatch):
+    (tmp_path / "package.json").write_text(json.dumps({"version": "9.9.9"}))
+    monkeypatch.setattr(swarm, "SWARM_HOME", tmp_path)
+    assert swarm.read_version() == "9.9.9"
+
+
+def test_read_version_missing_field_is_unknown(tmp_path, monkeypatch):
+    (tmp_path / "package.json").write_text(json.dumps({"name": "x"}))
+    monkeypatch.setattr(swarm, "SWARM_HOME", tmp_path)
+    assert swarm.read_version() == "unknown"
+
+
+def test_read_version_missing_file_is_unknown(tmp_path, monkeypatch):
+    monkeypatch.setattr(swarm, "SWARM_HOME", tmp_path)  # no package.json here
+    assert swarm.read_version() == "unknown"
+
+
+def test_version_flag_prints_and_exits(capsys):
+    parser = swarm.build_parser()
+    for flag in ("--version", "-v"):
+        with pytest.raises(SystemExit) as exc:
+            parser.parse_args([flag])
+        assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert "agentainer" in out
+
+
 # ----------------------------------------------------------------- helpers
 
 

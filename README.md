@@ -108,6 +108,7 @@ the CLI, and types each agent's first prompt into it.
 
 ```bash
 npm install -g agentainer
+agentainer --version     # print the installed version (also: agentainer -v)
 agentainer doctor        # check tmux/python3 are present; report which agent CLIs it found
 ```
 

@@ -2307,10 +2307,24 @@ def default_config() -> str:
     return "agents.yaml"
 
 
+def read_version() -> str:
+    """Best-effort read of the package version from package.json (single source
+    of truth), falling back to 'unknown' if it cannot be found or parsed."""
+    try:
+        data = json.loads((SWARM_HOME / "package.json").read_text())
+        return str(data.get("version") or "unknown")
+    except Exception:
+        return "unknown"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=os.environ.get("SWARM_PROG", "agentainer"),
         description="Run a swarm of coding agents (claude, codex, gemini, hermes) in tmux.",
+    )
+    parser.add_argument(
+        "-v", "--version", action="version", version=f"agentainer {read_version()}",
+        help="show the Agentainer version and exit",
     )
     parser.add_argument(
         "-c", "--config", default=default_config(), help="path to the swarm YAML (default: agents.yaml)"
