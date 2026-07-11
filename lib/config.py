@@ -1,4 +1,4 @@
-"""Load, normalise and validate an AgentSwarm YAML config."""
+"""Load, normalise and validate an Agentainer YAML config."""
 
 from __future__ import annotations
 
@@ -70,9 +70,9 @@ NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")
 
 DEFAULT_COMMS_TEMPLATE = """\
 ---
-## Swarm communication protocol
+## Inter-agent communication protocol
 
-You are the agent **{agent}** in the "{swarm}" swarm.
+You are the agent **{agent}** on the **{swarm}** team.
 Agents you are allowed to message: {peers}
 
 ### Receiving
@@ -91,9 +91,15 @@ which of its questions you are answering. Every message is also archived under
 
 ### Sending
 
-To send a message, write this block **in your reply**. It is read as soon as your
-turn ends, then delivered. Do not escape or quote the body -- write it literally,
-across as many lines as you need:
+Sending is a deliberate act, not something every turn needs. **Most of your turns
+will contain no tag at all** -- you think, run commands, and work in your own
+directory in plain text, exactly as you normally would. Write a message block ONLY
+when you actually want to hand something to another agent: a question, a result, or
+a handoff. When you have nothing to send, send nothing.
+
+When you do want to send, write this block **in your reply**. It is read as soon as
+your turn ends, then delivered. Do not escape or quote the body -- write it
+literally, across as many lines as you need:
 
     <swarm-send to="AGENT_NAME" reply-to="m-1a2b3c">
     Your message. Multiple lines, code blocks and quotes are all fine.
@@ -102,7 +108,7 @@ across as many lines as you need:
 To reach everyone you are allowed to talk to, use `<swarm-broadcast>` with no `to`.
 
 The `reply-to` attribute is optional; drop it when you are starting a new thread.
-Quoting it also tells the swarm your message is an answer, so the other agent is not
+Quoting it also marks your message as an answer, so the other agent is not
 chased for a reply to it. For an announcement that needs no answer, either use
 `<swarm-broadcast>` or add `expects-reply="false"`.
 
@@ -133,9 +139,14 @@ Prefer queueing, then get on with other work. Never spin in a retry loop.
     your files, or your reasoning.
   * Do not message an agent merely to acknowledge. Send when you have a question,
     a result, or a handoff.
-  * If someone messages you and your turn ends without a `<swarm-send>` block, your
-    answer reaches nobody. You will get one automatic reminder; after that the
-    sender is left waiting. Answer inside the block the first time.
+  * Write a full tag block only when you actually want to send. A complete
+    `<swarm-send to="...">...</swarm-send>` you write is delivered, so do not paste
+    a filled-in example to illustrate a point -- it would be sent for real. Naming
+    the tag in passing while you explain your plan is fine.
+  * A turn with no tag simply sends nothing, which is normal and expected. The one
+    exception: if another agent asked YOU something and your turn ends with no
+    block, your answer reaches nobody, so you get a single reminder. Never add a
+    block just to satisfy the reminder -- only to actually answer.
 """
 
 DEFAULT_REPLY_REMINDER_TEMPLATE = """\
@@ -179,8 +190,9 @@ DEFAULT_TASK_NOTICE_TEMPLATE = """\
 ## Standby
 
 Do not start any work yet. Your actual task will be sent to you in the **next**
-prompt. For now, briefly confirm that you have understood your role and are
-ready, then wait.
+prompt. For now, reply with one plain sentence confirming you understood your role
+-- no message block and no tags, this confirmation is just for your own screen and
+is not sent to anyone -- then wait.
 """
 
 
@@ -228,6 +240,8 @@ class SwarmConfig:
     pane_idle_ms: int = 2500
     pane_poll_ms: int = 700
     pane_scrollback: int = 400
+    tmux_history_limit: int = 50000
+    tmux_mouse: bool = True
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -298,7 +312,7 @@ def load(path: str | os.PathLike) -> SwarmConfig:
         raise ConfigError(
             f"config file not found: {cfg_path}\n"
             "   Create one with:  cp agents.example.yaml agents.yaml\n"
-            "   Or point at it:   swarm.sh -c /path/to/swarm.yaml up"
+            "   Or point at it:   agentainer -c /path/to/swarm.yaml up"
         )
 
     try:
@@ -563,7 +577,7 @@ def load(path: str | os.PathLike) -> SwarmConfig:
         if not agent.workdir.exists() and not agent.create_workdir:
             raise ConfigError(
                 f"agent {agent.name!r}: workdir does not exist: {agent.workdir}\n"
-                "   Create it yourself, or allow AgentSwarm to: create_workdir: true"
+                "   Create it yourself, or allow Agentainer to: create_workdir: true"
             )
 
     shared: dict[Path, list[str]] = {}
@@ -597,6 +611,8 @@ def load(path: str | os.PathLike) -> SwarmConfig:
         pane_idle_ms=int(swarm.get("pane_idle_ms", 2500)),
         pane_poll_ms=int(swarm.get("pane_poll_ms", 700)),
         pane_scrollback=int(swarm.get("pane_scrollback", 400)),
+        tmux_history_limit=int(swarm.get("tmux_history_limit", 50000)),
+        tmux_mouse=_as_bool(swarm.get("tmux_mouse"), True, "swarm.tmux_mouse"),
     )
 
     # Pass 3: build the full first prompt for each agent.

@@ -12,5 +12,5 @@ if [[ -n "${SWARM_ROOT:-}" ]] && mkdir -p "$SWARM_ROOT/.swarm/logs" 2>/dev/null;
   log="$SWARM_ROOT/.swarm/logs/hooks.log"
 fi
 
-"$HERE/swarm.sh" hook codex "${1:-}" >>"$log" 2>&1
+"$HERE/agentainer" hook codex "${1:-}" >>"$log" 2>&1
 exit 0

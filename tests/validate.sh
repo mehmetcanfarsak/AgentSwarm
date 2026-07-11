@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Full validation suite for AgentSwarm.
+# Full validation suite for Agentainer.
 #
 #   tests/validate.sh
 #
 # Mock agents only -- no model calls, no API keys, nothing to pay for. Every check
 # exercises the real code paths (tmux, hooks, locks, queues, sessions).
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SW="$REPO/swarm.sh"
+SW="$REPO/agentainer"
 export PYTHONPATH="$REPO/lib"   # quoted heredocs cannot expand $REPO themselves
 T="${TMPDIR:-/tmp}/agentswarm-validate.$$"
 PASS=0; FAIL=0
@@ -138,6 +138,15 @@ m,r,p = swarm.parse_outbound('<swarm-send to="a"></swarm-send>')
 assert not m and p
 m,r,p = swarm.parse_outbound("<swarm-send to='a' reply-to='m-1'>b</swarm-send>")
 assert m[0].reply_to=="m-1"
+# prose that merely names the tag must NOT be read as a botched send (no nudge)
+for prose in ("I'll use <swarm-send> blocks to answer.",
+              "Use \`<swarm-send>\` blocks.",
+              "I will <swarm-broadcast> the result later."):
+    m,r,p = swarm.parse_outbound(prose)
+    assert not m and not p, ("prose flagged as send:", prose, p)
+# a real block opened and never closed MUST still be flagged
+m,r,p = swarm.parse_outbound('<swarm-send to="a">body with no closing tag')
+assert not m and p, p
 print("OK")
 PY
 [ $? -eq 0 ] && ok "parse_outbound: send/broadcast/expects-reply/unclosed/empty/quotes" || bad "parse_outbound" ""
@@ -294,6 +303,28 @@ turn A "$T/quiet.jsonl" tw two_rem.yaml >/dev/null 2>&1
 n=$(ls tw/.swarm/inbox/A/*from-swarm* 2>/dev/null | wc -l)
 check "a quiet turn owing nothing is never nudged" "$n" "2"
 "$SW" down -c two_rem.yaml >/dev/null 2>&1
+
+# 3. a queue stranded on an agent whose capture never fires must self-heal: any
+#    other agent's turn end sweeps it once it is stale-busy past busy_timeout_ms.
+#    (This is the "one agent sent several messages, one recipient wedged" case.)
+rm -rf ws; "$SW" up -c s.yaml --no-prompt >/dev/null 2>&1; sleep 1
+python3 - <<PY
+import sys, time; sys.path.insert(0,'$REPO/lib')
+import config, swarm
+cfg = config.load('$T/s.yaml')
+# B looks busy but its turn started ages ago (its hook never fired) and a message
+# sits queued for it. On its own B would stay wedged forever.
+swarm.write_turn_state(cfg, "B", {"delivered":1,"completed":0,"since":time.time()-99999,"by":"A"})
+swarm.enqueue(cfg, "A", "B", "stranded task", hops=0)
+PY
+mkjson 'A done' > adone.jsonl
+turn A "$T/adone.jsonl" ws s.yaml >/dev/null 2>&1   # unrelated turn end triggers the sweep
+sleep 1
+grep -q "stranded task" ws/B/received.txt
+check "stale-busy agent's stranded queue self-heals on another turn end" "$?" "0"
+q=$("$SW" queue -c s.yaml B 2>/dev/null | head -1 | grep -o '0 message')
+check "swept queue is emptied" "$q" "0 message"
+"$SW" down -c s.yaml >/dev/null 2>&1
 
 # ------------------------------------------------------------------- sessions
 echo "== sessions / resume =="

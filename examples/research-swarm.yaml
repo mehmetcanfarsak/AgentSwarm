@@ -1,8 +1,8 @@
 # =============================================================================
 # Research swarm -- a small team that investigates a topic and writes it up.
 #
-#   ./swarm.sh up -c examples/research-swarm.yaml
-#   ./swarm.sh send --to lead "Research the state of WebGPU compute shaders."
+#   agentainer up -c examples/research-swarm.yaml
+#   agentainer send --to lead "Research the state of WebGPU compute shaders."
 #
 # Shape: hub and spoke. The lead hands out work and assembles the result; the
 # specialists only ever report back to the lead (and to each other where it

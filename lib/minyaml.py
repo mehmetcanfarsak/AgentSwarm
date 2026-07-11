@@ -1,7 +1,7 @@
 """A small YAML-subset parser.
 
-Used only when PyYAML is not importable, so that AgentSwarm keeps working on a
-bare Python 3 install. Supports the subset AgentSwarm configs actually need:
+Used only when PyYAML is not importable, so that Agentainer keeps working on a
+bare Python 3 install. Supports the subset Agentainer configs actually need:
 
   * nested block mappings and block sequences
   * scalars: strings, ints, floats, booleans, null

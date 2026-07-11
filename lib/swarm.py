@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""AgentSwarm -- run a swarm of coding agents in tmux and let them talk.
+"""Agentainer -- run a swarm of coding agents in tmux and let them talk.
 
-Invoked through ``swarm.sh``; see ``swarm.sh --help`` and README.md.
+Invoked through ``agentainer`` (or ``./agentainer`` from a clone); see
+``agentainer --help`` and README.md.
 """
 
 from __future__ import annotations
@@ -304,6 +305,56 @@ def drain_queue(cfg: SwarmConfig, agent: Agent) -> bool:
     return True
 
 
+def sweep_stale_queues(cfg: SwarmConfig, exclude: str | None = None) -> None:
+    """Drain queued mail for any *other* agent that is no longer busy.
+
+    A message is queued when its recipient is busy, and normally drains when that
+    recipient finishes its own turn. But if the recipient's capture never fires --
+    a crashed CLI, or a `type` whose hook does not match the `command` actually
+    running -- that turn end never arrives and the message is stranded forever.
+    Since turn completions are the only thing that wakes this process, every one is
+    an opportunity to also hand over anything stuck for an agent that has since gone
+    idle (busy_info fails a stale-busy agent open once busy_timeout_ms passes).
+    """
+    for other in cfg.agents:
+        if other.name == exclude:
+            continue
+        if not queue_read(cfg, other.name):
+            continue
+        if busy_info(cfg, other) is not None:
+            continue  # legitimately mid-turn; its own turn end will drain it
+        try:
+            drain_queue(cfg, other)
+        except SwarmError as exc:
+            warn(f"{other.name}: could not drain stranded queue: {exc}")
+
+
+def configure_tmux(cfg: SwarmConfig) -> str | None:
+    """Set the globals the swarm's panes inherit, before any agent pane is created.
+
+    history-limit is only consulted when a pane is spawned, and the default (2000
+    lines) is far too small to hold a long multi-agent conversation -- the user
+    attaches, tries to scroll up, and the early messages are already gone. mouse
+    mode lets the wheel scroll that backlog.
+
+    Both are global options, but a tmux server with no sessions exits immediately,
+    so `set -g` on a cold server (the normal state at `up`) does nothing. We hold
+    the server up with a throwaway session while setting them; the agent panes
+    created afterwards inherit the values. Returns the holder session name so the
+    caller can tear it down once real sessions keep the server alive; None if there
+    was nothing to configure. Best effort throughout: never block the swarm coming up.
+    """
+    if cfg.tmux_history_limit <= 0 and not cfg.tmux_mouse:
+        return None
+    holder = f"{cfg.session_prefix}swarm_setup"
+    tmux("new-session", "-d", "-s", holder, "sleep 86400", check=False)
+    if cfg.tmux_history_limit > 0:
+        tmux("set-option", "-g", "history-limit", str(cfg.tmux_history_limit), check=False)
+    if cfg.tmux_mouse:
+        tmux("set-option", "-g", "mouse", "on", check=False)
+    return holder
+
+
 def session_exists(session: str) -> bool:
     try:
         tmux("has-session", "-t", f"={session}", capture=True)
@@ -500,8 +551,8 @@ def read_sessions(cfg: SwarmConfig) -> dict:
 def write_sessions(cfg: SwarmConfig, agents: dict) -> None:
     cfg.runtime.mkdir(parents=True, exist_ok=True)
     header = (
-        "# AgentSwarm session state -- written automatically as agents work.\n"
-        "# `swarm up --resume` reads this to reattach each agent to its own\n"
+        "# Agentainer session state -- written automatically as agents work.\n"
+        "# `agentainer up --resume` reads this to reattach each agent to its own\n"
         "# conversation after a restart. Safe to delete; you then start fresh.\n"
     )
     body = yaml_dump(
@@ -621,7 +672,24 @@ OUTBOUND_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 ATTR_RE = re.compile(r"""([A-Za-z_-]+)\s*=\s*["']([^"']*)["']""")
-UNCLOSED_RE = re.compile(r"<swarm-(send|broadcast)\b", re.IGNORECASE)
+# Every opening tag, capturing its attributes and whether it ends its own line.
+OPENER_RE = re.compile(
+    r"<swarm-(?:send|broadcast)\b(?P<attrs>[^>]*)>(?P<tail>[ \t]*)(?P<nl>\n?)",
+    re.IGNORECASE,
+)
+ADDRESSED_RE = re.compile(r"\b(?:to|agent)\s*=", re.IGNORECASE)
+
+
+def _is_block_opener(attrs: str, ends_line: bool) -> bool:
+    """Does this opening tag look like the real start of a message block?
+
+    A genuine send carries a `to="..."`, and any real block opener sits at the end
+    of its line, the way the template shows it. A bare inline `<swarm-send>` with
+    neither -- `Use \\`<swarm-send>\\` blocks`, `I'll <swarm-send> the result` -- is
+    the agent naming the tag in prose, not attempting a send, and must not trigger a
+    spurious "your send failed" nudge.
+    """
+    return bool(ADDRESSED_RE.search(attrs)) or ends_line
 
 
 def new_message_id() -> str:
@@ -692,7 +760,15 @@ def parse_outbound(text: str) -> tuple[list[Outbound], str, list[str]]:
         )
 
     remainder = OUTBOUND_RE.sub("", text or "").strip()
-    if len(UNCLOSED_RE.findall(text or "")) > matched:
+    # A delivered block contributes one block-opener too, so more block-openers than
+    # delivered blocks means one was opened and never closed. Inline prose mentions
+    # of the tag are not block-openers, so naming the tag no longer looks like a
+    # failed send.
+    openers = sum(
+        1 for m in OPENER_RE.finditer(text or "")
+        if _is_block_opener(m.group("attrs"), bool(m.group("nl")))
+    )
+    if openers > matched:
         problems.append(
             "a <swarm-send> block was opened but never closed with </swarm-send>, "
             "so it could not be delivered"
@@ -772,7 +848,7 @@ def deliver(
     if not session_exists(target.session):
         raise SwarmError(
             f"agent {recipient!r} is not running (tmux session {target.session!r} missing). "
-            "Start it with: swarm up"
+            "Start it with: agentainer up"
         )
 
     msg_id = new_message_id()
@@ -797,7 +873,7 @@ def deliver(
         if not _paste_locked(cfg, target.session, body, enter=True, needle=needle):
             raise SwarmError(
                 f"could not confirm the message reached {recipient!r}; "
-                f"inspect it with: swarm attach {recipient}"
+                f"inspect it with: agentainer attach {recipient}"
             )
 
         with file_lock(cfg, recipient, "turn.lock"):
@@ -1005,6 +1081,10 @@ def on_turn_finished(cfg: SwarmConfig, agent: Agent, text: str) -> None:
     if not drain_queue(cfg, agent):
         handle_reply_reminder(cfg, agent, reached, problems)
 
+    # Any turn end is a chance to rescue mail stranded on an agent whose own capture
+    # never fired -- otherwise a single missed turn-completion wedges its queue.
+    sweep_stale_queues(cfg, exclude=agent.name)
+
 
 def forward_response(cfg: SwarmConfig, agent: Agent, text: str) -> list[str]:
     """Auto-forward a captured turn to the agent's forward_responses_to list.
@@ -1152,7 +1232,7 @@ def install_codex_hook(agent: Agent) -> Path:
     # to that table. `notify` must therefore come before anything else, or codex
     # reads it as projects.<dir>.notify and never calls it.
     chunks = [
-        "# installed by AgentSwarm -- fires when codex finishes a turn.",
+        "# installed by Agentainer -- fires when codex finishes a turn.",
         "# Keep `notify` above every [table] header: TOML is order-sensitive.",
         f"notify = [{notify}]",
         "",
@@ -1530,8 +1610,8 @@ def write_shim(cfg: SwarmConfig) -> None:
     shim = cfg.bin_dir / "swarm"
     shim.write_text(
         "#!/usr/bin/env bash\n"
-        "# Generated by AgentSwarm. Lets an agent run `swarm send ...` from its shell.\n"
-        f'exec {shlex.quote(str(SWARM_HOME / "swarm.sh"))} "$@"\n'
+        "# Generated by Agentainer. Lets an agent run `swarm send ...` from its shell.\n"
+        f'exec {shlex.quote(str(SWARM_HOME / "agentainer"))} "$@"\n'
     )
     shim.chmod(0o755)
 
@@ -1604,7 +1684,12 @@ def start_agent(cfg: SwarmConfig, agent: Agent, resume_cmd: str | None = None) -
     )
     launcher = f"exec bash -lc {shlex.quote(inner)}"
 
-    tmux("new-session", "-d", "-s", agent.session, "-c", str(agent.workdir), launcher)
+    # -x/-y give the detached pane a real size, so a long turn's output does not
+    # wrap to an 80x24 default and lose lines. history-limit and mouse are read
+    # from the globals configure_tmux() set *before* this call, so the pane
+    # inherits the large scrollback the user needs to scroll back through.
+    tmux("new-session", "-d", "-s", agent.session, "-x", "220", "-y", "50",
+         "-c", str(agent.workdir), launcher)
     info(f"started {agent.name} ({agent.type}) in tmux session {agent.session!r}")
 
 
@@ -1621,6 +1706,7 @@ def cmd_up(args) -> int:
         directory.mkdir(parents=True, exist_ok=True)
     write_shim(cfg)
     write_state(cfg)
+    setup_holder = configure_tmux(cfg)
 
     resume = cfg.resume if args.resume is None else args.resume
     recorded = read_sessions(cfg) if resume else {}
@@ -1654,6 +1740,11 @@ def cmd_up(args) -> int:
 
         start_agent(cfg, agent, resume_cmd)
         started.append(agent)
+
+    # The real agent sessions now keep the server alive, so the throwaway holder
+    # that let us set the global scrollback has done its job.
+    if setup_holder:
+        tmux("kill-session", "-t", f"={setup_holder}", check=False, capture=True)
 
     if not started:
         info("nothing to start")
@@ -1713,7 +1804,7 @@ def cmd_up(args) -> int:
     print()
     info(f"swarm {cfg.name!r} is up with {len(started)} agent(s)")
     info(f"attach with:  tmux attach -t {started[0].session}")
-    info(f"or:           {SWARM_HOME / 'swarm.sh'} attach {started[0].name}")
+    info(f"or:           {SWARM_HOME / 'agentainer'} attach {started[0].name}")
 
     if args.attach:
         os.execvp("tmux", ["tmux", "attach", "-t", started[0].session])
@@ -1952,7 +2043,7 @@ def cmd_inbox(args) -> int:
     cfg = cfgmod.load(args.config)
     name = args.agent or os.environ.get("SWARM_AGENT")
     if not name:
-        die("specify an agent: swarm inbox <agent>")
+        die("specify an agent: agentainer inbox <agent>")
     cfg.get(name)
 
     box = cfg.inbox_dir / name
@@ -2039,7 +2130,7 @@ def select_agents(cfg: SwarmConfig, only: str | None) -> list[Agent]:
 
 
 def default_config() -> str:
-    """SWARM_CONFIG, else ./agents.yaml, else the agents.yaml beside swarm.sh."""
+    """SWARM_CONFIG, else ./agents.yaml, else the agents.yaml beside agentainer."""
     from_env = os.environ.get("SWARM_CONFIG")
     if from_env:
         return from_env
@@ -2051,7 +2142,7 @@ def default_config() -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="swarm",
+        prog=os.environ.get("SWARM_PROG", "agentainer"),
         description="Run a swarm of coding agents (claude, codex, gemini, hermes) in tmux.",
     )
     parser.add_argument(

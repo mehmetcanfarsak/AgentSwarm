@@ -1,0 +1,52 @@
+{
+  "name": "agentainer",
+  "version": "0.1.2",
+  "description": "Run a configurable swarm of coding-agent CLIs (Claude Code, Codex, Gemini) in tmux and let them talk to each other.",
+  "keywords": [
+    "agents",
+    "ai",
+    "claude",
+    "codex",
+    "gemini",
+    "tmux",
+    "orchestration",
+    "multi-agent",
+    "swarm"
+  ],
+  "homepage": "https://github.com/mehmetcanfarsak/AgentSwarm#readme",
+  "bugs": {
+    "url": "https://github.com/mehmetcanfarsak/AgentSwarm/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mehmetcanfarsak/AgentSwarm.git"
+  },
+  "license": "MIT",
+  "author": "mehmetcanfarsak",
+  "type": "commonjs",
+  "bin": {
+    "agentainer": "bin/agentainer.js"
+  },
+  "files": [
+    "bin/agentainer.js",
+    "lib/*.py",
+    "hooks/*.sh",
+    "scripts/check-deps.js",
+    "agentainer",
+    "examples/*.yaml",
+    "agents.example.yaml",
+    "README.md",
+    "llms.txt"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/check-deps.js",
+    "doctor": "node scripts/check-deps.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "os": [
+    "linux",
+    "darwin"
+  ]
+}

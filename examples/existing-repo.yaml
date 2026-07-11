@@ -6,9 +6,9 @@
 # writes the code and a navigator who reads it as it lands.
 #
 #   1. Point `workdir` below at a real repository.
-#   2. ./swarm.sh validate -c examples/existing-repo.yaml
-#   3. ./swarm.sh up       -c examples/existing-repo.yaml
-#   4. ./swarm.sh send --to driver "Add retry-with-backoff to the HTTP client."
+#   2. agentainer validate -c examples/existing-repo.yaml
+#   3. agentainer up       -c examples/existing-repo.yaml
+#   4. agentainer send --to driver "Add retry-with-backoff to the HTTP client."
 #
 # Until you edit the paths, `validate` will refuse to run and tell you so --
 # that is the point of `create_workdir: false`.

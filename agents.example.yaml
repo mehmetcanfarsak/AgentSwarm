@@ -1,9 +1,9 @@
 # =============================================================================
-# AgentSwarm example configuration
+# Agentainer example configuration
 #
 #   cp agents.example.yaml agents.yaml
-#   ./swarm.sh validate --show-prompts     # check it without launching anything
-#   ./swarm.sh up                          # launch the swarm
+#   agentainer validate --show-prompts     # check it without launching anything
+#   agentainer up                          # launch the swarm
 #
 # Every key is documented inline. Anything marked (optional) can be omitted.
 # =============================================================================
@@ -32,7 +32,7 @@ swarm:
   # (optional) How long to keep probing an agent's input box for a response
   # before giving up and typing the first prompt anyway. Some CLIs (Claude Code)
   # silently discard keystrokes for several seconds partway through startup, so
-  # AgentSwarm waits for the input box to echo a throwaway token before typing.
+  # Agentainer waits for the input box to echo a throwaway token before typing.
   ready_timeout_ms: 60000
 
   # (optional) An agent is "busy" from when a message is submitted to it until its
@@ -50,7 +50,7 @@ swarm:
 
   # (optional) An agent that answers a question as plain prose sends nothing: only a
   # <swarm-send> block is delivered. When it owes a reply and its turn ends without
-  # one, AgentSwarm messages it explaining how to send. This is how many times.
+  # one, Agentainer messages it explaining how to send. This is how many times.
   max_reply_reminders: 1
 
   # (optional) Reattach agents to their previous conversations on `up`, using the ids
@@ -62,6 +62,14 @@ swarm:
   pane_idle_ms: 2500      # pane must be unchanged this long to count as "done"
   pane_poll_ms: 700       # how often the watcher samples the pane
   pane_scrollback: 400    # lines of scrollback to diff
+
+  # (optional) tmux comfort settings for when you `agentainer attach <agent>`.
+  # The default tmux scrollback (2000 lines) is too small to hold a long
+  # multi-agent conversation, so Agentainer raises it before creating sessions.
+  # mouse mode lets you wheel-scroll the backlog; press q to leave copy mode.
+  # Both are applied to the tmux server, so they also affect your other sessions.
+  tmux_history_limit: 50000   # lines of scrollback per agent pane (0 = leave tmux's default)
+  tmux_mouse: true            # enable mouse wheel scrolling in the panes
 
 # -----------------------------------------------------------------------------
 # defaults (optional) -- applied to every agent that does not override them.
@@ -77,13 +85,13 @@ defaults:
 # agent_types (optional) -- override the built-in launch commands, or define
 # entirely new agent types. Built-ins are: claude, codex, gemini, hermes.
 #
-#   capture: how AgentSwarm learns that an agent finished a turn.
+#   capture: how Agentainer learns that an agent finished a turn.
 #     hook -- the CLI can run an external program on turn completion.
 #             Supported for claude (Stop hook) and codex (notify program).
 #     pane -- no such facility: poll the tmux pane and diff it. Heuristic.
 #     none -- do not capture at all.
 #
-#   boot_delay_ms: a grace period before AgentSwarm starts probing the input
+#   boot_delay_ms: a grace period before Agentainer starts probing the input
 #     box. It does NOT need to cover the full startup time -- delivery of the
 #     first prompt is verified and retried, so a small value is fine.
 # -----------------------------------------------------------------------------
@@ -206,7 +214,7 @@ agents:
     # single `defaults.workdir` can serve every agent, e.g. "{root}/{name}-wt".
     #
     # Several agents may share one directory (they then see each other's edits;
-    # AgentSwarm warns you). Pair `create_workdir: false` with an existing
+    # Agentainer warns you). Pair `create_workdir: false` with an existing
     # project so a bad path is an error, not a new empty folder.
     #
     # workdir: ~/projects/acme-api
@@ -237,7 +245,7 @@ agents:
       You are the SCRIBE. Keep a running changelog of the project in NOTES.md.
 
 # -----------------------------------------------------------------------------
-# templates (optional) -- override the text AgentSwarm appends to first prompts.
+# templates (optional) -- override the text Agentainer appends to first prompts.
 # Available placeholders: {agent} {swarm} {peers} {prefix} {inbox} {workdir}
 # -----------------------------------------------------------------------------
 #

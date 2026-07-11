@@ -1,0 +1,13 @@
+# Runtime state produced by test runs -- never ship these.
+.swarm/
+workspace/
+examples/research-workspace/
+examples/research-output/
+**/__pycache__/
+*.pyc
+
+# Dev-only
+tests/
+.git/
+.gitignore
+agents.yaml

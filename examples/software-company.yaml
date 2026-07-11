@@ -2,8 +2,8 @@
 # Software company -- a product team with a CTO, an architect, two developers,
 # a QA reviewer and a technical writer.
 #
-#   ./swarm.sh up -c examples/software-company.yaml
-#   ./swarm.sh send --to cto "Build a URL shortener with an API and a web UI."
+#   agentainer up -c examples/software-company.yaml
+#   agentainer send --to cto "Build a URL shortener with an API and a web UI."
 #
 # The communication graph is deliberately not a free-for-all: developers talk to
 # their architect and to QA, but not to each other, so design decisions go

@@ -1,8 +1,8 @@
 # =============================================================================
 # Bug hunt -- an automatic pipeline: reproduce -> diagnose -> fix -> verify.
 #
-#   ./swarm.sh up -c examples/bug-hunt.yaml
-#   ./swarm.sh send --to reproducer "Uploads over 2MB fail with a 500 in prod."
+#   agentainer up -c examples/bug-hunt.yaml
+#   agentainer send --to reproducer "Uploads over 2MB fail with a 500 in prod."
 #
 # This is the one shape where `forward_responses_to` earns its keep: each stage
 # hands its finished turn to the next stage automatically, with no human in the

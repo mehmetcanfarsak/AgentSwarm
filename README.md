@@ -1,8 +1,11 @@
-# AgentSwarm
+# Agentainer
 
 Run a team of coding agents — **Claude Code, Codex, Gemini CLI, Hermes** — side by
 side in tmux, each in its own directory, each able to message the others only if
 your YAML file says it may.
+
+> Formerly **AgentSwarm**. Installed globally the command is `agentainer`; from a
+> clone, the `./agentainer` script in the repo root is the same thing.
 
 ```
    agents.yaml                 tmux
@@ -28,33 +31,53 @@ the agent's CLI, and types each agent's first prompt into it.
 
 - `tmux` (3.0+)
 - `python3` — PyYAML is used if present, otherwise a bundled parser handles the config
-- whichever agent CLIs you reference: `claude`, `codex`, `gemini`, `hermes`
+- `node` (16+) — only for the global `agentainer` command; not needed if you run `./agentainer` from a clone
+- whichever agent CLIs you reference: `claude`, `codex`, `gemini`, `hermes` — install only the one(s) you actually use
+
+## Install
+
+Global, via npm:
+
+```bash
+npm install -g agentainer
+agentainer doctor        # check tmux/python3 are present; report which agent CLIs it found
+```
+
+`agentainer doctor` verifies the required tools (`tmux`, `python3`) and reports
+which agent CLIs are available — it never fails on a missing *agent* CLI, since
+you may only use one of them.
+
+Or from a clone (no npm needed):
+
+```bash
+git clone https://github.com/mehmetcanfarsak/AgentSwarm.git && cd AgentSwarm
+./agentainer --help      # same commands as the global `agentainer`, straight from the repo
+```
 
 ## Quickstart
 
 ```bash
-git clone <this repo> && cd AgentSwarm
 cp agents.example.yaml agents.yaml
 
-./swarm.sh validate      # parse the config, print the resolved swarm, launch nothing
-./swarm.sh up            # create dirs, install hooks, start tmux, send first prompts
-./swarm.sh status        # who is running
-./swarm.sh attach developer
-./swarm.sh down          # stop everything
+agentainer validate      # parse the config, print the resolved swarm, launch nothing
+agentainer up            # create dirs, install hooks, start tmux, send first prompts
+agentainer status        # who is running
+agentainer attach developer
+agentainer down          # stop everything
 ```
 
 Give the swarm its actual work:
 
 ```bash
-./swarm.sh send --to orchestrator "Build a CLI that converts CSV to Parquet."
+agentainer send --to orchestrator "Build a CLI that converts CSV to Parquet."
 ```
 
 Watch the traffic between agents:
 
 ```bash
-./swarm.sh logs -f              # whole swarm, live
-./swarm.sh logs reviewer -n 20  # one agent
-./swarm.sh inbox developer      # messages an agent received
+agentainer logs -f              # whole swarm, live
+agentainer logs reviewer -n 20  # one agent
+agentainer inbox developer      # messages an agent received
 ```
 
 ---
@@ -112,15 +135,15 @@ Getting that to work reliably against a live TUI took more than a sleep:
 - **Claude Code silently discards keystrokes for several seconds partway through
   startup.** Measured on v2.1.205: input at t=2s landed, t=6s and t=12s vanished,
   t=20s landed. A fixed `boot_delay_ms` is therefore a coin flip. Before typing,
-  AgentSwarm types a throwaway token and waits for the input box to echo it back,
+  Agentainer types a throwaway token and waits for the input box to echo it back,
   then erases it (`ready_probe`). Enter is never sent, so nothing is submitted.
-- **Readiness is not monotonic**, so after pasting, AgentSwarm checks that the
+- **Readiness is not monotonic**, so after pasting, Agentainer checks that the
   text actually appeared on screen before pressing Enter, and retries if it did
   not. If delivery cannot be confirmed it refuses to press Enter, rather than
   submitting a half-delivered prompt.
 - **Both CLIs open a "do you trust this folder?" modal** on first run in a new
   directory, which would eat the first prompt (Enter answers the dialog). Claude
-  does this even under `--dangerously-skip-permissions`. AgentSwarm pre-trusts each
+  does this even under `--dangerously-skip-permissions`. Agentainer pre-trusts each
   agent's workdir: for codex in its generated `config.toml`, for claude by adding
   `hasTrustDialogAccepted` for that path in `~/.claude.json`.
 - **Both collapse a long paste into a chip** rather than showing the text —
@@ -176,7 +199,7 @@ tmux send-keys -t reviewer -l "your message" && tmux send-keys -t reviewer Enter
 **Agents get reminded when their answer goes nowhere.** A model that was asked a
 question will often just *write the answer as prose* and end its turn — and that
 prose reaches nobody, because only a `<swarm-send>` block is delivered. So when an
-agent owes a reply and finishes a turn without sending one, AgentSwarm messages it:
+agent owes a reply and finishes a turn without sending one, Agentainer messages it:
 
 ```
 Your last turn sent no message to anyone, and lead is waiting on your answer to
@@ -191,7 +214,7 @@ If instead the agent *tried* to send but the block was malformed, it gets the
 specific diagnosis — unclosed tag, missing `to`, unknown recipient, permission
 denied — so it can correct itself rather than lose the message silently.
 
-It is reminded at most `max_reply_reminders` times (default **1**), then AgentSwarm
+It is reminded at most `max_reply_reminders` times (default **1**), then Agentainer
 gives up and stops nagging. An agent that auto-forwards via `forward_responses_to`
 is never reminded, since its words did reach someone. Turn it off per agent with
 `reply_reminder: false`.
@@ -213,8 +236,8 @@ conversation instead of starting a fresh one — it does not re-send the first
 prompt, and it keeps any mail still queued for that agent:
 
 ```bash
-./swarm.sh sessions          # what is recorded, and the command that would resume it
-./swarm.sh up --resume       # reattach; agents without a recorded id start fresh
+agentainer sessions          # what is recorded, and the command that would resume it
+agentainer up --resume       # reattach; agents without a recorded id start fresh
 ```
 
 Claude is resumed with `--resume <id>`, codex with `resume <id>`. Set
@@ -239,7 +262,7 @@ agent sees on its own terminal. Use `can_talk_to: "*"` for "everyone else".
 
 ## Capturing what an agent says
 
-AgentSwarm needs to know when an agent finishes a turn — both to log it and to
+Agentainer needs to know when an agent finishes a turn — both to log it and to
 support auto-forwarding. How it finds out depends on the CLI, and the two
 mechanisms are **not** equally good:
 
@@ -253,7 +276,7 @@ mechanisms are **not** equally good:
   with **no `matcher` key** (`Stop` is not a tool event, and supplying one stops the
   interactive TUI from ever running the hook). It reads the session transcript.
   Claude fires the hook *before* flushing the assistant message to that transcript,
-  so AgentSwarm polls it briefly, and only reads text written after the last user
+  so Agentainer polls it briefly, and only reads text written after the last user
   message — otherwise a turn would silently capture nothing, or re-relay the
   previous turn's reply.
 - **codex** → the agent gets a private `CODEX_HOME` at `<agent-dir>/.codex/`
@@ -354,7 +377,14 @@ Some honest limits:
 - A turn started by a human typing directly into the pane is not tracked.
 - If a capture never fires (crashed CLI, misconfigured hook), the agent would look
   busy forever. After `busy_timeout_ms` (default 15 minutes) it is treated as idle
-  again, with a warning. `swarm idle <agent>` clears it immediately.
+  again, with a warning. `swarm idle <agent>` clears it immediately. Any mail queued
+  for such an agent is not lost either: whenever some *other* agent finishes a turn,
+  Agentainer sweeps the now-idle agent's queue and delivers what was stranded — so
+  one missed turn-completion cannot wedge a queue permanently.
+- A capture only fires if the agent's `type` matches the CLI its `command` actually
+  runs. If you point a `type: codex` agent at a `claude` command (e.g. through an
+  alias), it gets codex's `notify` hook, which claude never calls — its turns are
+  never detected and it looks busy forever. Set `type` to whatever the command runs.
 - `--force` and `--ignore-busy` deliver anyway. The agent's CLI will queue the
   message and handle it after the current tool call, so nothing is lost — you just
   give up the backpressure.
@@ -402,6 +432,8 @@ Machine-readable summary for agents: [`llms.txt`](llms.txt).
 | `pane_idle_ms` | `2500` | Quiet time before a `pane` turn counts as done |
 | `pane_poll_ms` | `700` | Pane sampling interval |
 | `pane_scrollback` | `400` | Lines of scrollback the watcher diffs |
+| `tmux_history_limit` | `50000` | Scrollback kept per agent pane so you can scroll up (`0` = tmux default) |
+| `tmux_mouse` | `true` | Enable mouse-wheel scrolling in the panes |
 
 ### `agents:`
 
@@ -446,7 +478,7 @@ agent_types:
 
 `defaults:` supplies any agent key for agents that don't set it, including
 `workdir` — useful for putting a whole swarm in one repository. `templates:`
-overrides the text AgentSwarm generates — `comms` and `task_notice` (appended to
+overrides the text Agentainer generates — `comms` and `task_notice` (appended to
 first prompts), plus `reply_reminder` and `send_failed` (the nudges) —
 with `{agent} {swarm} {peers} {prefix} {inbox} {workdir}` available as
 placeholders.
@@ -465,9 +497,9 @@ Ready-to-run swarms in [`examples/`](examples/):
 | [`existing-repo.yaml`](examples/existing-repo.yaml) | Pairing | Two agents in one **existing** checkout, with `create_workdirs: false` |
 
 ```bash
-./swarm.sh validate -c examples/research-swarm.yaml   # look before you leap
-./swarm.sh up       -c examples/research-swarm.yaml
-./swarm.sh send --to lead "Research the state of WebGPU compute shaders."
+agentainer validate -c examples/research-swarm.yaml   # look before you leap
+agentainer up       -c examples/research-swarm.yaml
+agentainer send --to lead "Research the state of WebGPU compute shaders."
 ```
 
 `existing-repo.yaml` intentionally refuses to start until you point `workdir` at
@@ -477,28 +509,28 @@ a repository that exists.
 
 | Command | Purpose |
 |---|---|
-| `swarm.sh up` | Start the swarm. `--only a,b`, `--restart`, `--resume`, `--no-prompt`, `--attach` |
-| `swarm.sh down` | Kill sessions and watchers. `--only a,b` |
-| `swarm.sh restart` | `down` then `up` |
-| `swarm.sh status` | Table of agents, sessions, capture mode, permissions |
-| `swarm.sh attach <agent>` | Attach to an agent's tmux session |
-| `swarm.sh send --to <agent> "msg"` | Deliver a message (`--from`, `--file`, `--queue`, `--wait`, `--ignore-busy`, `--force`) |
-| `swarm.sh broadcast "msg"` | Message everyone the sender may talk to |
-| `swarm.sh sessions` | Show each agent's recorded conversation id (`--raw`) |
-| `swarm.sh queue <agent>` | Show what is waiting for a busy agent (`--clear`) |
-| `swarm.sh idle <agent>` | Force an agent back to idle, then drain its queue |
-| `swarm.sh inbox <agent>` | Print archived messages |
-| `swarm.sh logs [agent] [-f]` | Event log: prompts, responses, messages |
-| `swarm.sh validate` | Parse the config. `--show-prompts` renders final prompts |
+| `agentainer up` | Start the swarm. `--only a,b`, `--restart`, `--resume`, `--no-prompt`, `--attach` |
+| `agentainer down` | Kill sessions and watchers. `--only a,b` |
+| `agentainer restart` | `down` then `up` |
+| `agentainer status` | Table of agents, sessions, capture mode, permissions |
+| `agentainer attach <agent>` | Attach to an agent's tmux session |
+| `agentainer send --to <agent> "msg"` | Deliver a message (`--from`, `--file`, `--queue`, `--wait`, `--ignore-busy`, `--force`) |
+| `agentainer broadcast "msg"` | Message everyone the sender may talk to |
+| `agentainer sessions` | Show each agent's recorded conversation id (`--raw`) |
+| `agentainer queue <agent>` | Show what is waiting for a busy agent (`--clear`) |
+| `agentainer idle <agent>` | Force an agent back to idle, then drain its queue |
+| `agentainer inbox <agent>` | Print archived messages |
+| `agentainer logs [agent] [-f]` | Event log: prompts, responses, messages |
+| `agentainer validate` | Parse the config. `--show-prompts` renders final prompts |
 
-`./swarm.sh my-swarm.yaml` is shorthand for `./swarm.sh up -c my-swarm.yaml`.
+`agentainer my-swarm.yaml` is shorthand for `agentainer up -c my-swarm.yaml`.
 `-c` and `$SWARM_CONFIG` both select a config; `-c` wins.
 
 ## Layout
 
 ```
 AgentSwarm/
-├── swarm.sh                # entrypoint
+├── agentainer                # entrypoint
 ├── agents.example.yaml     # annotated config
 ├── llms.txt                # reference for agents configuring this tool
 ├── hooks/
@@ -536,7 +568,7 @@ being skipped, and a transcript read before Claude has flushed it.
 ## Troubleshooting
 
 **"could not confirm the text arrived; NOT pressing Enter".** The agent's input
-box never echoed the prompt, so AgentSwarm refused to submit it. Attach to the
+box never echoed the prompt, so Agentainer refused to submit it. Attach to the
 session to see what state the CLI is in -- usually a modal (login, trust,
 onboarding) is holding focus. Raise `ready_timeout_ms` if the CLI is merely slow.
 
@@ -551,7 +583,16 @@ doing its job — add the recipient to the sender's `can_talk_to`.
 other. Raise `max_forward_hops`, or break the cycle in `forward_responses_to`.
 
 **Nothing captured from a claude agent.** Check `<agent-dir>/.claude/settings.json`
-exists and `.swarm/logs/hooks.log` for errors.
+exists and `.swarm/logs/hooks.log` for errors. If the agent also looks busy forever,
+its `type` probably does not match the CLI its `command` runs (see the capture note
+under [Busy agents](#busy-agents-and-backpressure)).
+
+**Can't scroll up in an attached session.** Agentainer raises tmux's scrollback to
+`tmux_history_limit` (50000 lines) and turns on `tmux_mouse`, so the wheel scrolls
+the backlog; press `q` to leave copy mode. If your terminal grabs the wheel itself,
+use `Ctrl-b [` then PageUp. Both options are set on the tmux server before sessions
+are created, so a server that was already running keeps its old panes' smaller
+buffer — restart the swarm (or that pane) to pick up the larger one.
 
 ## A note on flags
 

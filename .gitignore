@@ -7,3 +7,8 @@
 
 __pycache__/
 *.pyc
+
+# npm
+/node_modules/
+*.tgz
+.npmrc

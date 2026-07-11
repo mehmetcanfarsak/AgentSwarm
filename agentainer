@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
-# AgentSwarm -- launch a configurable swarm of coding agents in tmux.
+# Agentainer -- launch a configurable swarm of coding agents in tmux.
 #
-#   ./swarm.sh up                    start every agent in agents.yaml
-#   ./swarm.sh up -c my-swarm.yaml   ...from a different config
-#   ./swarm.sh agents.yaml           shorthand for `up -c agents.yaml`
-#   ./swarm.sh status                see who is running
-#   ./swarm.sh send --to dev "hi"    message an agent
-#   ./swarm.sh attach dev            jump into an agent's tmux session
-#   ./swarm.sh down                  stop everything
+#   ./agentainer up                    start every agent in agents.yaml
+#   ./agentainer up -c my-swarm.yaml   ...from a different config
+#   ./agentainer agents.yaml           shorthand for `up -c agents.yaml`
+#   ./agentainer status                see who is running
+#   ./agentainer send --to dev "hi"    message an agent
+#   ./agentainer attach dev            jump into an agent's tmux session
+#   ./agentainer down                  stop everything
 #
 # See README.md for the full reference, or llms.txt if you are an LLM.
 set -euo pipefail
@@ -27,7 +27,7 @@ if [[ -z "$PYTHON" ]]; then
 fi
 
 if [[ -z "$PYTHON" ]]; then
-  echo "xx AgentSwarm needs python3 on PATH (or set SWARM_PYTHON)" >&2
+  echo "xx Agentainer needs python3 on PATH (or set SWARM_PYTHON)" >&2
   exit 1
 fi
 

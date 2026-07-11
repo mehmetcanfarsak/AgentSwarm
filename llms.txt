@@ -1,17 +1,17 @@
-# AgentSwarm
+# Agentainer
 
-> AgentSwarm runs several coding-agent CLIs (Claude Code, Codex, Gemini, Hermes) at once.
+> Agentainer runs several coding-agent CLIs (Claude Code, Codex, Gemini, Hermes) at once.
 > Each agent gets its own directory and its own tmux session. A single YAML file defines
 > the agents, the command that launches each one, its first prompt, and — as a strict
 > whitelist — which other agents it is allowed to message.
 >
-> This file is the reference for LLMs asked to write or repair an AgentSwarm config.
+> This file is the reference for LLMs asked to write or repair an Agentainer config.
 > If you are configuring a swarm, everything you need is below. Verify your work with
-> `./swarm.sh validate --show-prompts`, which parses the config and launches nothing.
+> `agentainer validate --show-prompts`, which parses the config and launches nothing.
 
 ## Mental model
 
-- One YAML file describes the whole swarm. `./swarm.sh up` reads it and, for each agent:
+- One YAML file describes the whole swarm. `agentainer up` reads it and, for each agent:
   creates `<root>/<name>/`, installs a turn-completion hook in that folder, opens a tmux
   session named `<session_prefix><name>`, runs the agent's `command` inside the folder,
   waits for its input box to become responsive, then types the assembled first prompt in.
@@ -44,6 +44,8 @@ swarm:
   pane_idle_ms: 2500       # quiet time before a `pane` capture counts as a finished turn
   pane_poll_ms: 700        # pane sampling interval
   pane_scrollback: 400     # lines of scrollback the pane watcher diffs
+  tmux_history_limit: 50000 # scrollback per agent pane so you can scroll up when attached; 0 = tmux default
+  tmux_mouse: true         # enable mouse-wheel scrolling in the panes
 
 defaults:                  # any agent key; applied to agents that omit it
   type: claude
@@ -80,7 +82,7 @@ agents:
     append_agents_that_you_can_talk_to_prompt: true
     in_first_prompt_append_your_task_will_be_sent_in_the_next_prompt: false
 
-templates:                 # override the text AgentSwarm generates
+templates:                 # override the text Agentainer generates
   comms: |                 # placeholders: {agent} {swarm} {peers} {prefix} {inbox} {workdir}
     You are {agent}. You may message: {peers}.
   task_notice: |
@@ -167,7 +169,7 @@ prose reaches nobody -- only a `<swarm-send>` block is delivered. So:
   to write.
 - If B *tried* to send but the block was malformed -- unclosed, missing `to`, unknown
   recipient, permission denied -- it gets the `send_failed` template naming each fault.
-- At most `max_reply_reminders` nudges (default 1), then AgentSwarm gives up silently.
+- At most `max_reply_reminders` nudges (default 1), then Agentainer gives up silently.
 - Anything B delivered counts, including an auto-forward via `forward_responses_to`.
   Reminders are sent from `swarm`, so they never create a reply obligation themselves.
 - `reply_reminder: false` disables it per agent; it is forced off when the agent's
@@ -221,23 +223,23 @@ Final prompt order: `first_prompt`, then the comms block, then the task notice.
 ## Commands
 
 ```
-./swarm.sh up [--only a,b] [--restart] [--no-prompt] [--attach]
-./swarm.sh down [--only a,b]
-./swarm.sh restart
-./swarm.sh status
-./swarm.sh attach <agent>
-./swarm.sh send --to <agent> [--from <name>] [--file F] [--queue] [--wait]
+agentainer up [--only a,b] [--restart] [--no-prompt] [--attach]
+agentainer down [--only a,b]
+agentainer restart
+agentainer status
+agentainer attach <agent>
+agentainer send --to <agent> [--from <name>] [--file F] [--queue] [--wait]
                              [--wait-timeout S] [--ignore-busy] [--force] "message"
-./swarm.sh broadcast "message"
-./swarm.sh queue <agent> [--clear]
-./swarm.sh idle <agent> [--no-drain]
-./swarm.sh inbox <agent> [-n N]
-./swarm.sh logs [agent] [-n N] [-f]
-./swarm.sh validate [--show-prompts]
+agentainer broadcast "message"
+agentainer queue <agent> [--clear]
+agentainer idle <agent> [--no-drain]
+agentainer inbox <agent> [-n N]
+agentainer logs [agent] [-n N] [-f]
+agentainer validate [--show-prompts]
 ```
 
 Config resolution: `-c PATH`, else `$SWARM_CONFIG`, else `./agents.yaml`, else the
-`agents.yaml` beside `swarm.sh`. `./swarm.sh x.yaml` is shorthand for `up -c x.yaml`.
+`agents.yaml` beside `agentainer`. `agentainer x.yaml` is shorthand for `up -c x.yaml`.
 
 ## What an agent sees at runtime
 
@@ -321,6 +323,11 @@ agents:
   and the agent always accepts mail.
 - `busy_timeout_ms` fails open if a capture never fires; `swarm idle <agent>` clears it.
 - Auto-forwarded responses to a busy peer are queued rather than dropped.
+- Queues self-heal: every turn end sweeps other agents and drains any that have gone
+  idle (or gone stale-busy past `busy_timeout_ms`), so a single missed turn-completion
+  cannot strand queued mail forever. A capture only fires when `type` matches the CLI
+  the `command` actually launches — a `type: codex` agent running `claude` never reports
+  turn ends and looks busy forever.
 
 ## Subagents and concurrency
 
@@ -380,7 +387,7 @@ agents:
   limit stops them. Prefer one-directional forwarding, or none.
 - `--dangerously-skip-permissions` / `--yolo` let agents run tools unsupervised. Point
   `root` at a disposable directory.
-- The first prompt is typed into a live TUI. If AgentSwarm reports "could not confirm
+- The first prompt is typed into a live TUI. If Agentainer reports "could not confirm
   the text arrived", the CLI is usually stuck behind a modal (login, trust, onboarding);
   attach to the session and look. Raise `ready_timeout_ms` if it is merely slow.
 - PyYAML is used when installed; otherwise a bundled subset parser handles the config.
