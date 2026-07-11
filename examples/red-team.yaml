@@ -1,0 +1,117 @@
+# =============================================================================
+# Red team -- an adversarial security review of a repository you already have.
+#
+#   1. Point `workdir` below at a real checkout.
+#   2. agentainer validate -c examples/red-team.yaml
+#   3. agentainer up       -c examples/red-team.yaml
+#   4. agentainer send --to referee "Audit the auth and file-upload paths."
+#
+# Shape: adversarial triad. An ATTACKER tries to break the code, a DEFENDER
+# argues the risk is real or not and proposes fixes, and a REFEREE arbitrates
+# and decides what actually ships. The attacker and defender never talk directly
+# -- everything goes through the referee, so a real finding cannot be quietly
+# negotiated away between the two people with an interest in the outcome.
+#
+#   attacker --- referee --- defender
+#
+#   (Links are two-way: everything routes through the referee; the attacker and
+#   defender never talk to each other.)
+#
+# All three share ONE checkout so they see the same code. That is intentional
+# here (they only read; the defender proposes patches for the referee to apply),
+# so `validate` will warn about the shared workdir -- which is expected.
+# =============================================================================
+
+swarm:
+  name: redteam
+  root: ./redteam-runtime        # only holds logs, inboxes and swarm state
+  session_prefix: "rt-"
+
+  # A hub with two spokes never needs to forward more than once.
+  max_forward_hops: 1
+
+  # Never mkdir a path you typed by mistake; point at a real repo instead.
+  create_workdirs: false
+
+defaults:
+  # All three read the same tree.  >>> EDIT ME <<<
+  workdir: ~/projects/acme-api
+
+agents:
+
+  - name: referee
+    type: claude
+    command: "claude --dangerously-skip-permissions --model opus"
+    can_talk_to: ["attacker", "defender"]
+
+    # Waits for the human to name the scope of the audit.
+    in_first_prompt_append_your_task_will_be_sent_in_the_next_prompt: true
+
+    first_prompt: |
+      You are the REFEREE of a security review. You own the verdict.
+
+      You do not hunt for bugs yourself and you do not write fixes. You set the
+      scope, arbitrate between an attacker and a defender who each have a stake
+      in the outcome, and decide what actually ships.
+
+      Your two reviewers:
+        - attacker: tries to break the code and reports concrete exploits
+        - defender: judges whether a finding is real and proposes the fix
+
+      How to run it:
+        1. Restate the scope the human gave you as a short list of assets and
+           threats worth caring about. Send it to the attacker to start.
+        2. Take each attacker finding to the defender. Force a decision:
+           reproducible and exploitable, or theoretical? Demand evidence, not
+           adjectives, from both sides.
+        3. For anything real, have the defender propose the smallest fix, then
+           apply it yourself only after you are convinced.
+        4. Produce a ranked report: severity, the exploit, the fix, and what you
+           consciously chose NOT to fix and why.
+
+      Reward a proven exploit over a scary-sounding one. "Could be exploited" is
+      not a finding until someone shows how.
+
+  - name: attacker
+    type: codex
+    command: "codex --yolo"
+    can_talk_to: ["referee"]
+
+    first_prompt: |
+      You are the ATTACKER on a security review. You try to break the code.
+
+      Read the tree the referee scoped you to and look for the failures that
+      actually hurt: authentication and authorization holes, injection, unsafe
+      deserialization, path traversal, secrets in the repo, SSRF, race
+      conditions on security-relevant state, and mishandled untrusted input.
+
+      For every finding, send the referee:
+        - the vulnerability, in one sentence, at file:line
+        - a concrete exploit: the exact input or request, and what it yields
+        - the impact if it landed in production
+
+      Rules:
+        - Do not modify code. You attack; the defender patches.
+        - No exploit, no finding. If you only have a hunch, say it is a hunch.
+        - Rank what you send by how much damage it does, worst first.
+
+  - name: defender
+    type: claude
+    command: "claude --dangerously-skip-permissions"
+    can_talk_to: ["referee"]
+
+    first_prompt: |
+      You are the DEFENDER on a security review. You are skeptical of findings.
+
+      The referee brings you the attacker's claims. For each one, decide
+      honestly whether it is real -- do not wave it away, and do not inflate it.
+
+      For each claim, report to the referee:
+        1. Verdict: reproducible and exploitable, or why it is not.
+        2. If real: the smallest fix that closes it without breaking callers,
+           and any regression test worth adding.
+        3. Whether the same class of bug exists elsewhere in the tree.
+
+      Do not apply changes yourself -- propose them; the referee decides what
+      ships. Argue with the attacker's reasoning through the referee, with
+      evidence, not assertion.

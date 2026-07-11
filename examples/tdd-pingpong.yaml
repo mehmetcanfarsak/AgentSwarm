@@ -1,0 +1,82 @@
+# =============================================================================
+# TDD ping-pong -- two agents grow a feature test-first, one test at a time.
+#
+#   1. Point `workdir` below at the repo you want to build in.
+#   2. agentainer validate -c examples/tdd-pingpong.yaml
+#   3. agentainer up       -c examples/tdd-pingpong.yaml
+#   4. agentainer send --to tester "Build a rate limiter: N requests per window."
+#
+# Shape: a tight two-agent loop with a strict protocol. The TESTER writes ONE
+# failing test; the CODER writes the least code to pass it and hands back; the
+# tester writes the next test. Nobody auto-forwards -- each handoff is a
+# deliberate `<swarm-send>`, which keeps the red/green rhythm explicit.
+#
+#     tester  <-->  coder
+#
+# They share ONE checkout on purpose (that is the whole game), so `validate`
+# will warn about the shared workdir -- expected here. The protocol, not a
+# folder boundary, keeps them from colliding: only one holds the ball at a time.
+# =============================================================================
+
+swarm:
+  name: tddpp
+  root: ./tdd-runtime            # only holds logs, inboxes and swarm state
+  session_prefix: "tdd-"
+  create_workdirs: false
+
+defaults:
+  # Both agents build in the same tree.  >>> EDIT ME <<<
+  workdir: ~/projects/scratch-lib
+
+agents:
+
+  - name: tester
+    type: claude
+    command: "claude --dangerously-skip-permissions"
+    can_talk_to: ["coder"]
+
+    # The human hands the feature to the tester, who starts the loop.
+    in_first_prompt_append_your_task_will_be_sent_in_the_next_prompt: true
+
+    first_prompt: |
+      You are the TESTER in a TDD ping-pong. You own the RED step.
+
+      The protocol, one turn at a time:
+        1. Write exactly ONE new failing test that pushes the feature one small
+           step forward -- the simplest behaviour not yet implemented.
+        2. Run it. Confirm it fails, and fails for the right reason (not a typo,
+           import error, or missing file).
+        3. Hand off to the coder: the test's name, what behaviour it pins down,
+           and the failure output you saw. Then stop and wait.
+
+      Rules:
+        - One test per turn. Never write two steps ahead.
+        - Test behaviour through the public interface, not private internals.
+        - Do NOT write production code -- that is the coder's job. If the design
+          the coder chose makes the next test awkward, say so and let them
+          refactor on their green turn.
+        - When the feature is fully covered and you have no next test, say the
+          feature is DONE instead of inventing busywork.
+
+  - name: coder
+    type: codex
+    command: "codex --yolo"
+    can_talk_to: ["tester"]
+
+    first_prompt: |
+      You are the CODER in a TDD ping-pong. You own the GREEN and REFACTOR steps.
+
+      When the tester hands you a failing test:
+        1. Write the LEAST code that makes it pass -- honestly the least, even if
+           it looks too simple. Do not implement behaviour no test demands yet.
+        2. Run the whole suite. Everything must be green, not just the new test.
+        3. Refactor only now, with tests green: remove duplication, improve names.
+           Re-run the suite after refactoring.
+        4. Hand back to the tester: what you did, the passing suite output, and
+           anything about the design they should know before the next test.
+
+      Rules:
+        - Do not add tests, and do not edit the tester's tests to make them pass.
+          If a test seems wrong, argue for it -- do not quietly change it.
+        - Resist gold-plating. YAGNI: the tests define the spec.
+        - If a test cannot be made to pass as written, explain why and hand back.

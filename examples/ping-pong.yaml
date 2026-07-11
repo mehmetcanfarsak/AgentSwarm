@@ -1,0 +1,89 @@
+# =============================================================================
+# Ping-pong -- two agents trade a unit of work back and forth, in turn.
+#
+#   1. Point `workdir` below at the repo you want to build in.
+#   2. agentainer validate -c examples/ping-pong.yaml
+#   3. agentainer up       -c examples/ping-pong.yaml
+#   4. agentainer send --to runner "Build a rate limiter: N requests per window."
+#
+# Shape: a round-robin built on BROADCAST. This is deliberately different from
+# tdd-pingpong.yaml, which uses `forward_responses_to` (one fixed next step):
+# here every handoff is a broadcast that names who is up next, so the same
+# group can rotate any number of roles in any order.
+#
+#        runner  <-->  coder
+#        (each broadcasts to the group, naming the next agent in the @-tag)
+#
+# They share ONE checkout on purpose (that is the whole game), so `validate`
+# will warn about the shared workdir -- expected here. The protocol, not a
+# folder boundary, keeps them from colliding: only one holds the ball at a time.
+# =============================================================================
+
+swarm:
+  name: pingpong
+  root: ./pingpong-runtime        # only holds logs, inboxes and swarm state
+  session_prefix: "pp-"
+
+  # Broadcasts don't auto-forward, so one hop is all the guard ever needs.
+  max_forward_hops: 1
+
+  # Never mkdir a path you typed by mistake; point at a real repo instead.
+  create_workdirs: false
+
+defaults:
+  # Both agents build in the same tree.  >>> EDIT ME <<<
+  workdir: ~/projects/scratch-lib
+
+  type: claude
+  command: "claude --dangerously-skip-permissions"
+  # They can each reach the other, so either can broadcast the handoff.
+  can_talk_to: ["runner", "coder"]
+
+agents:
+
+  - name: runner
+    # Override: the runner starts the job and holds the spec.
+    command: "claude --dangerously-skip-permissions"
+    can_talk_to: ["coder"]
+
+    in_first_prompt_append_your_task_will_be_sent_in_the_next_prompt: true
+
+    first_prompt: |
+      You are the RUNNER. You own the task and the spec; the CODER implements
+      it. You two trade the work back and forth, exactly one of you active at a
+      time.
+
+      To hand off, broadcast to the group but name the coder explicitly as up
+      next, and sign your turn so the other agent knows who just spoke:
+
+          <swarm-broadcast>
+          @coder: your turn. Implement step 1 -- a token bucket with N
+          requests per window and a refill rate. Don't exceed the spec.
+          -- runner
+          </swarm-broadcast>
+
+      When the coder hands back ("@runner: your turn -- done, here's what I
+      built"), review it against the spec. If it meets the bar, broadcast a
+      final "done" and stop. If not, broadcast the next instruction to the
+      coder. Never both work at once; the ball is always with one of you.
+
+  - name: coder
+    command: "claude --dangerously-skip-permissions"
+    can_talk_to: ["runner"]
+
+    first_prompt: |
+      You are the CODER. You implement what the RUNNER specifies, one step at a
+      time, and hand each step back for review.
+
+      When the runner broadcasts a turn ending in "@coder: your turn", do exactly
+      that step -- no more, no freelancing. When done, broadcast back naming the
+      runner and reporting what you built:
+
+          <swarm-broadcast>
+          @runner: your turn -- done. Token bucket with N=100 per 60s window,
+          lazy refill on read. Tests pass.
+          -- coder
+          </swarm-broadcast>
+
+      Wait for the runner's next instruction or a "done". Do not start the next
+      step on your own, and do not edit while the runner holds the ball.

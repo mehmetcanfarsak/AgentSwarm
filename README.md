@@ -1,11 +1,80 @@
-# Agentainer
+<!-- Banner -->
+<p align="center">
+  <img alt="Agentainer — multi-agent orchestrator for AI coding agents" src="https://raw.githubusercontent.com/mehmetcanfarsak/AgentSwarm/main/assets/banner.svg" width="820">
+</p>
 
-Run a team of coding agents — **Claude Code, Codex, Gemini CLI, Hermes** — side by
-side in tmux, each in its own directory, each able to message the others only if
-your YAML file says it may.
+<!-- Badges -->
+<p align="center">
+  <img alt="license" src="https://img.shields.io/badge/license-MIT-blue.svg">
+  <img alt="zero deps" src="https://img.shields.io/badge/dependencies-zero-brightgreen.svg">
+  <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%2F%20macOS-lightgrey.svg">
+  <img alt="tests" src="https://img.shields.io/badge/tests-48%20checks%20passing-success.svg">
+</p>
 
-> Formerly **AgentSwarm**. Installed globally the command is `agentainer`; from a
-> clone, the `./agentainer` script in the repo root is the same thing.
+<h1 align="center">Agentainer — Multi-Agent Orchestrator for AI Coding Agents</h1>
+
+<p align="center">
+  <strong>A zero-dependency multi-agent orchestrator for AI coding agents.</strong><br>
+  Run a team of <b>Claude Code</b>, <b>OpenAI Codex</b>, <b>Gemini CLI</b>, and <b>Hermes</b> side by side in <b>tmux</b> — each in its own directory, each messaging the others only where your config allows.
+</p>
+
+<p align="center">
+  <em>Formerly <strong>AgentSwarm</strong>. Installed globally the command is <code>agentainer</code>; from a clone, <code>./agentainer</code> in the repo root is identical.</em>
+</p>
+
+**Agentainer** is a lightweight, stdlib-only orchestrator (Python 3 + bash + tmux, no runtime dependencies) that launches multiple AI coding agents — Claude Code, OpenAI Codex, Google's Gemini CLI, and Hermes — in isolated tmux sessions, each with its own working directory, and routes messages between them under a configurable access-control list. Define your whole agent team in a single YAML file; one command brings it online.
+
+<!-- Demo -->
+<p align="center">
+  <img alt="Terminal demo: agentainer up starts four agents, status shows them running, send delivers a task, and logs stream the routed messages" src="https://raw.githubusercontent.com/mehmetcanfarsak/AgentSwarm/main/assets/demo.svg" width="760">
+  <br>
+  <em>Start a four-agent swarm, check status, hand it a task, and watch the messages route — in four commands.</em>
+</p>
+
+---
+
+## 📑 Table of contents
+
+- [Why Agentainer](#-why-agentainer)
+- [How it fits together](#-how-it-fits-together)
+- [Requirements](#-requirements)
+- [Install](#-install)
+- [Quickstart](#-quickstart)
+- [FAQ](#-faq)
+- [How it works](#-how-it-works)
+- [Capturing what an agent says](#-capturing-what-an-agent-says)
+- [Subagents, parallel work, and busy agents](#subagents-parallel-work-and-busy-agents)
+- [Configuration reference](#️-configuration-reference)
+- [Examples](#-examples)
+- [Commands](#-commands)
+- [Project layout](#-project-layout)
+- [Tests](#-tests)
+- [Troubleshooting](#️-troubleshooting)
+- [A note on flags](#️-a-note-on-flags)
+
+## ✨ Why Agentainer
+
+- **Multi-agent, one command.** Spin up a whole team with `agentainer up` — folders, hooks, tmux sessions, and first prompts, all wired automatically.
+- **Zero runtime dependencies.** Just Python 3 + bash + tmux. No pip installs, no bloated toolchain.
+- **Real ACLs, not vibes.** Agents only message who your YAML `can_talk_to` list permits. `"*"` for everyone, an explicit list for tight graphs.
+- **Survives restarts.** Each turn's conversation id is recorded; `up --resume` reattaches instead of starting cold.
+- **Self-healing routing.** Busy agents queue inbound work, stranded messages get swept, and agents are nudged when a reply reaches nobody.
+- **Any mix of CLIs.** Claude, Codex, Gemini, Hermes — or your own type — in the same swarm.
+
+## 🏗️ How it fits together
+
+*Architecture at a glance: a single `agents.yaml` file maps each AI coding agent to its own tmux session and working directory, while Agentainer routes and logs every message between them under a `can_talk_to` access-control list.*
+
+<p align="center">
+  <img alt="Agentainer architecture: one YAML file maps each agent to its own tmux session and working directory; Agentainer routes and logs permission-checked messages between them" src="https://raw.githubusercontent.com/mehmetcanfarsak/AgentSwarm/main/assets/architecture.svg" width="900">
+</p>
+
+One command starts the swarm: it creates a folder per agent, installs a
+completion hook inside each folder, opens a tmux session per agent, launches
+the CLI, and types each agent's first prompt into it.
+
+<details>
+<summary>Plain-text diagram</summary>
 
 ```
    agents.yaml                 tmux
@@ -21,22 +90,20 @@ your YAML file says it may.
    one folder per agent    messages routed + logged
 ```
 
-One command starts the swarm: it creates a folder per agent, installs a
-completion hook inside each folder, opens a tmux session per agent, launches
-the agent's CLI, and types each agent's first prompt into it.
+</details>
 
 ---
 
-## Requirements
+## 📋 Requirements
 
-- `tmux` (3.0+)
-- `python3` — PyYAML is used if present, otherwise a bundled parser handles the config
-- `node` (16+) — only for the global `agentainer` command; not needed if you run `./agentainer` from a clone
+- **`tmux`** (3.0+)
+- **`python3`** — PyYAML is used if present, otherwise a bundled parser handles the config
+- **`node`** (16+) — only for the global `agentainer` command; not needed if you run `./agentainer` from a clone
 - whichever agent CLIs you reference: `claude`, `codex`, `gemini`, `hermes` — install only the one(s) you actually use
 
-## Install
+## 🚀 Install
 
-Global, via npm:
+**Global, via npm:**
 
 ```bash
 npm install -g agentainer
@@ -47,14 +114,14 @@ agentainer doctor        # check tmux/python3 are present; report which agent CL
 which agent CLIs are available — it never fails on a missing *agent* CLI, since
 you may only use one of them.
 
-Or from a clone (no npm needed):
+**Or from a clone (no npm needed):**
 
 ```bash
 git clone https://github.com/mehmetcanfarsak/AgentSwarm.git && cd AgentSwarm
 ./agentainer --help      # same commands as the global `agentainer`, straight from the repo
 ```
 
-## Quickstart
+## ⚡ Quickstart
 
 ```bash
 cp agents.example.yaml agents.yaml
@@ -80,9 +147,43 @@ agentainer logs reviewer -n 20  # one agent
 agentainer inbox developer      # messages an agent received
 ```
 
+`agentainer status` gives you the whole swarm at a glance — who is up, who is mid-turn, and how deep each queue is:
+
+<p align="center">
+  <img alt="agentainer status output: a table of agents with their type, state, turn, queue depth, capture mode, and can_talk_to permissions" src="https://raw.githubusercontent.com/mehmetcanfarsak/AgentSwarm/main/assets/screenshot-status.svg" width="820">
+</p>
+
 ---
 
-## How it works
+## ❓ FAQ
+
+**What is Agentainer?**
+Agentainer is a zero-dependency multi-agent orchestrator that runs a team of AI coding agents — Claude Code, OpenAI Codex, Google's Gemini CLI, and Hermes — in isolated tmux sessions, each with its own working directory, and routes messages between them under a configurable access-control list. You describe the whole team in one YAML file and start it with a single command.
+
+**Which AI coding agents does Agentainer support?**
+Claude Code (`claude`), OpenAI Codex (`codex`), Google's Gemini CLI (`gemini`), and Hermes (`hermes`) out of the box. You can also define your own agent type via `agent_types:` — any CLI that takes input on stdin/tty works, with `capture: pane` or `capture: none`.
+
+**Does Agentainer need Docker or any runtime dependencies?**
+No. It is stdlib-only: Python 3, bash, and tmux. PyYAML is used if present, but a bundled parser handles the config without it. Node is only needed for the global `npm` launcher — running `./agentainer` from a clone needs no Node at all.
+
+**How do I run multiple coding agents together?**
+Write a YAML config listing your agents (and who may talk to whom), then run `agentainer up`. It creates a folder and a tmux session per agent, installs a turn-completion hook, launches each CLI, and types in the first prompt. `agentainer send --to <agent> "…"` messages any agent; `agentainer validate` previews the resolved swarm without launching anything.
+
+**Can agents communicate with each other, and how is that controlled?**
+Yes. Agents exchange tagged `<swarm-message>` / `<swarm-send>` blocks. Messaging is a whitelist: an agent may only reach the agents in its `can_talk_to` list (`"*"` means everyone else); anything else is refused. Auto-forwarding (`forward_responses_to`) can relay finished turns hands-free, bounded by a hop count to prevent loops.
+
+**How do I resume a swarm after a crash or reboot?**
+Each finished turn records the agent's conversation id in `.swarm/sessions.yaml`. `agentainer up --resume` reattaches every agent to its own conversation instead of starting cold, keeping any queued mail. Claude resumes with `--resume <id>`, Codex with `resume <id>`; Gemini and Hermes have no recoverable session id and always start fresh (with a warning).
+
+**Is it safe to let agents run unattended?**
+Agents run with whatever privileges their CLI is launched with. Flags like `claude --dangerously-skip-permissions`, `codex --yolo`, and `gemini --yolo` let them act without confirmation, which is usually what you want for an unattended swarm — so point `root` at a disposable directory and never run a swarm over a checkout you can't afford to lose.
+
+**How is Agentainer different from just opening several terminals?**
+It automates the brittle parts: detecting when each turn finishes (via a Stop/notify hook for Claude/Codex, or pane polling for Gemini/Hermes), typing multi-line prompts reliably into a live TUI, pre-trusting folders so the "trust this directory?" modal doesn't eat the first prompt, enforcing the comms ACL, queueing messages to busy agents, and resuming conversations after a restart.
+
+---
+
+## 🔧 How it works
 
 **One folder + one tmux session per agent.** Agent `developer` gets
 `workspace/developer/` and a tmux session named `developer` (plus any
@@ -121,9 +222,8 @@ agents:
   checkout), but agents then overwrite each other's files and interleave commits,
   so `validate` and `up` warn when it happens. See
   [`examples/existing-repo.yaml`](examples/existing-repo.yaml).
-
-`root` is still used even when every agent lives elsewhere: it holds `.swarm/`
-with the logs, inboxes and the `swarm` shim.
+- `root` is still used even when every agent lives elsewhere: it holds `.swarm/`
+  with the logs, inboxes and the `swarm` shim.
 
 **Prompts are typed in, not piped.** `swarm up` drops each first prompt into the
 agent's input box with a tmux bracketed paste, as one block, then presses Enter.
@@ -260,7 +360,7 @@ agent sees on its own terminal. Use `can_talk_to: "*"` for "everyone else".
 
 ---
 
-## Capturing what an agent says
+## 🎬 Capturing what an agent says
 
 Agentainer needs to know when an agent finishes a turn — both to log it and to
 support auto-forwarding. How it finds out depends on the CLI, and the two
@@ -408,7 +508,7 @@ speak, and leave `forward_responses_to` unset.
 
 ---
 
-## Configuration reference
+## ⚙️ Configuration reference
 
 Full annotated example: [`agents.example.yaml`](agents.example.yaml).
 Machine-readable summary for agents: [`llms.txt`](llms.txt).
@@ -485,7 +585,7 @@ placeholders.
 
 ---
 
-## Examples
+## 🧪 Examples
 
 Ready-to-run swarms in [`examples/`](examples/):
 
@@ -495,6 +595,16 @@ Ready-to-run swarms in [`examples/`](examples/):
 | [`software-company.yaml`](examples/software-company.yaml) | Org chart | Six agents across all four CLIs, with a deliberately restricted comms graph |
 | [`bug-hunt.yaml`](examples/bug-hunt.yaml) | Pipeline | `forward_responses_to` chaining reproduce → diagnose → fix → verify, hands-free |
 | [`existing-repo.yaml`](examples/existing-repo.yaml) | Pairing | Two agents in one **existing** checkout, with `create_workdirs: false` |
+| [`red-team.yaml`](examples/red-team.yaml) | Adversarial triad | Attacker vs defender arbitrated by a referee, over one **existing** checkout |
+| [`debate.yaml`](examples/debate.yaml) | Debate + judge | Two advocates argue opposite sides; a judge cross-examines and rules |
+| [`writers-room.yaml`](examples/writers-room.yaml) | Hub + review cycle | An editor driving a writer, fact-checker and critic to a finished article |
+| [`incident-response.yaml`](examples/incident-response.yaml) | Incident hub | A commander coordinating investigator/responder/scribe under time pressure |
+| [`tdd-pingpong.yaml`](examples/tdd-pingpong.yaml) | Tight 2-agent loop | Tester writes one failing test, coder makes it pass, in one shared repo |
+| [`brainstorm.yaml`](examples/brainstorm.yaml) | Diverge + converge | Three angled idea-generators fanning out, then a synthesiser ranks them |
+| [`localization.yaml`](examples/localization.yaml) | Pipeline | Translate → review → back-check, auto-forwarded via `forward_responses_to` |
+| [`multi-language-broadcast.yaml`](examples/multi-language-broadcast.yaml) | Broadcast fan-out | One translator broadcasts a source to N language reviewers; a consolidator compiles and broadcasts back |
+| [`code-review-broadcast.yaml`](examples/code-review-broadcast.yaml) | Broadcast hub | One PR broadcast to specialist reviewers (correctness/security/perf); each replies to the coordinator who synthesizes |
+| [`ping-pong.yaml`](examples/ping-pong.yaml) | Round-robin | Two agents trade a unit of work, each broadcast naming who is up next (distinct from tdd-pingpong's fixed `forward_responses_to`) |
 
 ```bash
 agentainer validate -c examples/research-swarm.yaml   # look before you leap
@@ -505,7 +615,7 @@ agentainer send --to lead "Research the state of WebGPU compute shaders."
 `existing-repo.yaml` intentionally refuses to start until you point `workdir` at
 a repository that exists.
 
-## Commands
+## 💻 Commands
 
 | Command | Purpose |
 |---|---|
@@ -526,7 +636,7 @@ a repository that exists.
 `agentainer my-swarm.yaml` is shorthand for `agentainer up -c my-swarm.yaml`.
 `-c` and `$SWARM_CONFIG` both select a config; `-c` wins.
 
-## Layout
+## 📁 Project layout
 
 ```
 AgentSwarm/
@@ -541,19 +651,19 @@ AgentSwarm/
 │   ├── config.py           # schema, defaults, validation
 │   └── minyaml.py          # YAML subset parser, used when PyYAML is absent
 ├── tests/validate.sh       # full suite: mock agents, no model calls
-├── examples/               # research swarm, software company, bug hunt, pairing
+├── examples/               # research, software company, bug hunt, pairing, red team, debate, writers' room, incident, tdd, brainstorm, l10n, multi-language + code-review (broadcast), ping-pong (round-robin)
 └── workspace/              # created by `up`
     ├── <agent>/            # one folder per agent
     └── .swarm/
         ├── state.json      # what `up` started
-    ├── sessions.yaml   # each agent's conversation id, for `up --resume`
+        ├── sessions.yaml   # each agent's conversation id, for `up --resume`
         ├── bin/swarm       # the `swarm` command agents call
         ├── logs/           # <agent>.jsonl + swarm.jsonl
         ├── inbox/<agent>/  # archived messages
         └── run/            # watcher pids, hop counters
 ```
 
-## Tests
+## ✅ Tests
 
 ```bash
 tests/validate.sh
@@ -565,7 +675,7 @@ nothing. It covers the awkward cases: the check-and-set race between concurrent
 senders, a queued message beating a reply reminder, a subagent's sidechain turn
 being skipped, and a transcript read before Claude has flushed it.
 
-## Troubleshooting
+## 🛠️ Troubleshooting
 
 **"could not confirm the text arrived; NOT pressing Enter".** The agent's input
 box never echoed the prompt, so Agentainer refused to submit it. Attach to the
@@ -594,7 +704,7 @@ use `Ctrl-b [` then PageUp. Both options are set on the tmux server before sessi
 are created, so a server that was already running keeps its old panes' smaller
 buffer — restart the swarm (or that pane) to pick up the larger one.
 
-## A note on flags
+## ⚠️ A note on flags
 
 `claude --dangerously-skip-permissions`, `codex --yolo` and `gemini --yolo` let
 agents act without asking for confirmation. That is usually what you want for an

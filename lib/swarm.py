@@ -2117,7 +2117,17 @@ def cmd_validate(args) -> int:
 
 def cmd_watch(args) -> int:
     cfg = cfgmod.load(args.config)
-    run_watcher(cfg, cfg.get(args.agent))
+    agent = cfg.get(args.agent)
+    if agent.capture != "pane":
+        die(
+            f"{agent.name}: capture={agent.capture}, nothing to watch. The pane "
+            f"watcher is only for pane-capture agents (gemini/hermes); "
+            f"{agent.type} agents detect turn completion via "
+            f"{'a Stop hook' if agent.capture == 'hook' else 'no capture at all'}."
+        )
+    if not session_exists(agent.session):
+        die(f"{agent.name}: session {agent.session!r} is not running (start it with `up`).")
+    run_watcher(cfg, agent)
     return 0
 
 

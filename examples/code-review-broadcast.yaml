@@ -1,0 +1,109 @@
+# =============================================================================
+# Code review by broadcast -- one PR, several specialist lenses at once.
+#
+#   1. agentainer validate -c examples/code-review-broadcast.yaml
+#   2. agentainer up       -c examples/code-review-broadcast.yaml
+#   3. agentainer send --to coordinator "Review PR #42 (git diff main...HEAD)."
+#
+# Shape: a hub built on `broadcast`. The COORDINATOR fans the diff out to
+# every reviewer in one message; each REVIEWER owns one concern (correctness,
+# security, performance) and reports back to the coordinator, who synthesizes a
+# single review. The reviewers never talk to each other -- cross-cutting findings
+# are the coordinator's job to merge.
+#
+#        coordinator
+#            |  (broadcast the PR to all)
+#            v
+#     +-------+--------+
+#     |       |        |
+#  correctness security  perf
+#     |       |        |
+#     +--- coordinator ---+   (each reviewer replies to the coordinator)
+#
+# `broadcast` is the point of the example: the coordinator reaches several
+# peers with one message and does not care which are mid-task. Every link is
+# two-way. The change under review is passed in the prompt, so the swarm
+# validates and runs without pointing at any repo.
+# =============================================================================
+
+swarm:
+  name: review
+  root: ./review-runtime        # only holds logs, inboxes and swarm state
+  session_prefix: "rv-"
+
+  # Broadcasts don't auto-forward, so one hop is all the guard ever needs.
+  max_forward_hops: 1
+
+  # Each agent gets its own scratch folder under `root` for logs and state.
+  # The change under review is passed in the prompt (a `git diff`), so the agents
+  # never need to read a repo off disk -- point `workdir` here only if you want
+  # them to read the tree directly.
+  create_workdirs: true
+
+agents:
+
+  - name: coordinator
+    type: claude
+    command: "claude --dangerously-skip-permissions --model opus"
+    can_talk_to: ["correctness", "security", "perf"]
+
+    in_first_prompt_append_your_task_will_be_sent_in_the_next_prompt: true
+
+    first_prompt: |
+      You are the REVIEW COORDINATOR. You do not review code yourself; you run
+      the review and merge the findings.
+
+      When the human gives you a change (a PR or a `git diff`), broadcast it to
+      every reviewer at once, each with the one concern they own:
+
+          <swarm-broadcast>
+          Review this change (PR #42, git diff main...HEAD):
+            - correctness: does it do what it claims? logic, edge cases, regressions
+            - security:    injection, authz, secrets, unsafe deserialization
+            - perf:        hot paths, N+1s, allocations, unbounded growth
+          Reply to me (the coordinator) with findings only for your lane.
+          </swarm-broadcast>
+
+      Collect the three replies. Merge overlapping findings, dedupe, and rank by
+      severity. Produce ONE consolidated review: a short verdict (Approve / Request
+      changes) followed by a bullet list of findings with file:line and the lane
+      that raised each. Do not invent findings the reviewers did not make.
+
+  - name: correctness
+    type: claude
+    command: "claude --dangerously-skip-permissions"
+    can_talk_to: ["coordinator"]
+    first_prompt: |
+      You are the CORRECTNESS reviewer. You receive a change broadcast by the
+      coordinator; review ONLY whether it does what it claims.
+
+      Look for: logic errors, off-by-one and boundary mistakes, wrong types or
+      null handling, missing or wrong edge-case handling, and silent regressions
+      in behaviour. Quote the offending line. When done, reply to the coordinator
+      with findings for this lane only -- nothing about security or performance.
+
+  - name: security
+    type: claude
+    command: "claude --dangerously-skip-permissions"
+    can_talk_to: ["coordinator"]
+    first_prompt: |
+      You are the SECURITY reviewer. You receive a change broadcast by the
+      coordinator; review ONLY for security risk.
+
+      Look for: injection (SQL/command/HTML), broken or missing authz, secrets
+      committed or logged, unsafe deserialization, path traversal, and trust of
+      unvalidated input. Quote the offending line and the abuse scenario. When done,
+      reply to the coordinator with findings for this lane only.
+
+  - name: perf
+    type: codex
+    command: "codex --yolo"
+    can_talk_to: ["coordinator"]
+    first_prompt: |
+      You are the PERFORMANCE reviewer. You receive a change broadcast by the
+      coordinator; review ONLY for performance.
+
+      Look for: accidental O(n^2) or N+1 patterns, allocations in hot loops,
+      unbounded growth (caches, lists), missing batching or indexes, and blocking
+      calls on the request path. Quote the offending line and the expected cost.
+      When done, reply to the coordinator with findings for this lane only.

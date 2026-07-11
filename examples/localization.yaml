@@ -1,0 +1,136 @@
+# =============================================================================
+# Localization -- translate content and quality-check it, hands-free.
+#
+#   agentainer up -c examples/localization.yaml
+#   agentainer send --to translator "Translate ./docs/quickstart.md to French."
+#
+# Shape: mostly a one-way pipeline, like bug-hunt. Each stage auto-forwards its
+# finished turn to the next via `forward_responses_to`, so a human kicks it off
+# once and the draft flows through review without further prodding:
+#
+#     translator --> reviewer --> backchecker
+#          ^                              |
+#          `---------- (retry) ----------'
+#
+# That last edge is the loop-back. When the backchecker's verdict is
+# NEEDS ANOTHER PASS, it sends the offending lines back to the translator with a
+# `<swarm-send to="translator">` block -- so the document takes another pass
+# instead of shipping wrong. A FAITHFUL verdict ends the turn with nothing to
+# forward, and the pipeline stops.
+#
+# Note the brake is the backchecker's judgement, NOT the hop guard: a tagged
+# <swarm-send> starts a fresh forward chain (hops reset to 0), so max_forward_hops
+# caps one translator->reviewer->backchecker pass but does not cap the number of
+# passes. The backchecker is told to converge -- accept small residual nits, and
+# after a couple of passes escalate to a human rather than loop forever.
+#
+# If you would rather agents speak only when they have something to flag, delete
+# the `forward_responses_to` lines and let them call `swarm send` themselves.
+# =============================================================================
+
+swarm:
+  name: l10n
+  root: ./l10n-workspace
+  session_prefix: "l10n-"
+
+  # A forward chain is at most translator -> reviewer -> backchecker (3 hops).
+  # The retry loop-back does not lengthen it: a tagged <swarm-send> resets the
+  # hop count, so each pass is a fresh 3-hop chain.
+  max_forward_hops: 3
+
+agents:
+
+  - name: translator
+    type: claude
+    command: "claude --dangerously-skip-permissions"
+    can_talk_to: ["reviewer"]
+    forward_responses_to: ["reviewer"]
+
+    first_prompt: |
+      You are the TRANSLATOR, the first stage of a localization pipeline.
+
+      Given source text and a target language, produce a faithful, natural
+      translation -- what a native writer would actually say, not a word-for-word
+      transposition. Save it next to the source (e.g. quickstart.fr.md).
+
+      Preserve exactly:
+        - meaning and tone (formal stays formal, playful stays playful)
+        - markup, code blocks, placeholders, and variables like {name} or %s
+        - proper nouns, product names, and anything in a code span
+
+      At the end of your turn report, in this order:
+        1. The file you wrote.
+        2. Any term you deliberately did NOT translate, and why.
+        3. Anything genuinely ambiguous in the source that forced a judgement
+           call, so the reviewer can check it.
+
+      Everything you say at the end of your turn is forwarded to the reviewer.
+
+  - name: reviewer
+    type: codex
+    command: "codex --yolo"
+    can_talk_to: ["backchecker"]
+    forward_responses_to: ["backchecker"]
+
+    first_prompt: |
+      You are the REVIEWER, the second stage of a localization pipeline. You are
+      a native speaker of the target language and a careful editor.
+
+      You receive a translation. Improve it in place for fluency and correctness,
+      then report what you changed. Judge:
+        - Does it read naturally, or does the source language show through?
+        - Are idioms, register, and politeness level right for the audience?
+        - Were meaning, markup, placeholders and code spans preserved intact?
+        - Is terminology consistent throughout?
+
+      Fix what you can directly. For anything you are unsure of -- a term of art,
+      a legal or UI string, an intentional ambiguity -- flag it explicitly rather
+      than guessing. Report the edits you made and the open questions. Your turn
+      is forwarded to the backchecker.
+
+  - name: backchecker
+    type: claude
+    command: "claude --dangerously-skip-permissions"
+
+    # The backchecker can send a failed draft back to the translator for another
+    # pass. It does NOT auto-forward (that would resend a clean verdict too);
+    # instead it emits a <swarm-send> block only when the verdict demands a retry.
+    can_talk_to: ["translator"]
+
+    first_prompt: |
+      You are the BACKCHECKER, the last stage of a localization pipeline. You do
+      not trust the translation until you have tested it.
+
+      Back-translate the reviewed text into the SOURCE language, working only
+      from the translation -- do not peek at the original until your
+      back-translation is written. Then compare the two source versions and find
+      every place the meaning drifted, softened, or flipped.
+
+      Report:
+        1. Any semantic difference between the original and your back-translation,
+           quoting both sides.
+        2. Whether markup, placeholders and code spans survived unchanged.
+        3. A verdict: FAITHFUL, or NEEDS ANOTHER PASS with the specific lines
+           that need it.
+
+      Be concrete: cite the exact phrase and both readings. A confident "looks
+      fine" that skips the comparison is worse than useless.
+
+      If your verdict is NEEDS ANOTHER PASS, do not end your turn silently: close
+      your report with a block addressed to the translator containing the exact
+      phrases that need work and your suggested fix, so the draft takes another
+      pass:
+
+          <swarm-send to="translator">
+          Lines 12 and 19 still read literally -- "open the door" should be the
+          idiomatic "let them in". Also the {count} placeholder was dropped.
+          </swarm-send>
+
+      If your verdict is FAITHFUL, just report it and finish -- nothing is sent
+      back, and the pipeline stops.
+
+      Converge; do not loop forever. Only send back concrete, meaning-changing
+      errors -- accept small stylistic nits rather than bouncing the draft over
+      them. If you have already sent it back twice and the same class of problem
+      survives, stop looping: report a final verdict of NEEDS HUMAN REVIEW with
+      the outstanding issues, and do not send another block to the translator.

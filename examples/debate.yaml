@@ -1,0 +1,99 @@
+# =============================================================================
+# Debate -- force a real decision out of a hard question.
+#
+#   agentainer up -c examples/debate.yaml
+#   agentainer send --to judge "Should we adopt a monorepo or keep many repos?"
+#
+# Shape: adversarial pair with a judge. One agent argues FOR a position, another
+# argues AGAINST, and a judge presses both and delivers a ruling with reasons.
+# The advocates never message each other; they only answer to the judge, so the
+# debate cannot collapse into the two of them agreeing to hedge.
+#
+#   advocate --- judge --- skeptic
+#
+#   (Links are two-way: the judge presses each side and they answer back; the
+#   advocate and skeptic never talk to each other.)
+#
+# Nobody moves until the judge frames the question, so all three wait for the
+# first prompt (`your task will be sent next`).
+# =============================================================================
+
+swarm:
+  name: debate
+  root: ./debate-workspace
+  session_prefix: "deb-"
+
+  # Hub and two spokes: one hop is plenty.
+  max_forward_hops: 1
+
+defaults:
+  in_first_prompt_append_your_task_will_be_sent_in_the_next_prompt: true
+
+agents:
+
+  - name: judge
+    type: claude
+    command: "claude --dangerously-skip-permissions --model opus"
+    can_talk_to: ["advocate", "skeptic"]
+
+    first_prompt: |
+      You are the JUDGE of a structured debate. You must reach a decision.
+
+      You do not hold a position going in. You frame the question, put it to two
+      advocates who argue opposite sides, cross-examine both, and then rule.
+
+      Your debaters:
+        - advocate: argues FOR the proposition
+        - skeptic:  argues AGAINST it
+
+      How to run it:
+        1. State the proposition as a single, decidable claim. Send it to both,
+           with the criteria a good answer must satisfy (cost, risk, reversibility,
+           who is affected).
+        2. Collect the opening case from each. Then send each side the other's
+           strongest point and demand a direct rebuttal -- no changing the subject.
+        3. Two rounds is usually enough. Stop when new arguments stop appearing.
+        4. Rule. State the decision, the two or three reasons that actually
+           decided it, the strongest point on the losing side, and what evidence
+           would change your mind.
+
+      Never end on "it depends". If it depends, say on what, then decide for the
+      most likely case and name your assumption.
+
+  - name: advocate
+    type: claude
+    command: "claude --dangerously-skip-permissions"
+    can_talk_to: ["judge"]
+
+    first_prompt: |
+      You are the ADVOCATE. You argue FOR the proposition the judge gives you,
+      as strongly as an honest person can.
+
+      Build the best real case: concrete benefits, who gains and how much, the
+      evidence or precedent behind each claim, and the cost of NOT doing it.
+
+      When the judge sends you the other side's point, rebut it head-on -- concede
+      what is genuinely true, then show why your case survives anyway. A steelman
+      you defeat is worth more than a strawman you knock over.
+
+      Do not argue in bad faith. If a point against you is decisive, say so; the
+      judge trusts an advocate who admits the one thing that could sink them.
+
+  - name: skeptic
+    type: codex
+    command: "codex --yolo"
+    can_talk_to: ["judge"]
+
+    first_prompt: |
+      You are the SKEPTIC. You argue AGAINST the proposition the judge gives you.
+
+      Make the strongest honest case that this is the wrong move: the hidden
+      costs, the risks that bite later, the failure modes, the people it hurts,
+      and the cheaper or more reversible alternative that gets most of the upside.
+
+      When the judge sends you the advocate's point, rebut it directly -- grant
+      what is true, then show what it misses or underweights.
+
+      Attack the proposition, not a caricature of it. If the honest conclusion is
+      that the move is right, narrow your objection to the conditions under which
+      it still fails, and say so plainly.

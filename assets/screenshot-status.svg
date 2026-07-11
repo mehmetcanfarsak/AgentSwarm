@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 360" width="900" height="360" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" role="img" aria-label="agentainer status output: a table of four agents (orchestrator, researcher, developer, reviewer), each up, with their capture mode and can_talk_to permissions.">
+  <defs>
+    <linearGradient id="sbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0c1220"/><stop offset="1" stop-color="#0a0f1c"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="360" rx="14" fill="url(#sbg)" stroke="#243352"/>
+  <rect width="900" height="44" rx="14" fill="#111a2e"/>
+  <rect y="30" width="900" height="14" fill="#111a2e"/>
+  <circle cx="26" cy="22" r="7" fill="#ff5f56"/>
+  <circle cx="50" cy="22" r="7" fill="#ffbd2e"/>
+  <circle cx="74" cy="22" r="7" fill="#27c93f"/>
+  <text x="450" y="27" text-anchor="middle" font-size="13" fill="#6a7c99">agentainer status</text>
+
+  <g font-size="14.5">
+    <text x="24" y="80"><tspan fill="#7ee787">$</tspan> <tspan fill="#e6edf7">agentainer status</tspan></text>
+    <text x="24" y="106" fill="#8aa0c0">swarm: <tspan fill="#e6edf7">demo</tspan>   root: <tspan fill="#e6edf7">/workspace</tspan></text>
+
+    <text x="24" y="140" fill="#6a7c99">AGENT         TYPE    STATE  TURN   QUEUE  CAPTURE  CAN TALK TO</text>
+    <text x="24" y="156" fill="#233043">────────────  ──────  ─────  ─────  ─────  ───────  ───────────────────────────────</text>
+
+    <text x="24" y="182"><tspan fill="#e6edf7">orchestrator  claude  </tspan><tspan fill="#7ee787">up   </tspan><tspan fill="#e6edf7">  idle   -      hook     </tspan><tspan fill="#8aa0c0">researcher, developer, reviewer</tspan></text>
+    <text x="24" y="208"><tspan fill="#e6edf7">researcher    gemini  </tspan><tspan fill="#7ee787">up   </tspan><tspan fill="#e6edf7">  idle   -      pane     </tspan><tspan fill="#8aa0c0">orchestrator, developer</tspan></text>
+    <text x="24" y="234"><tspan fill="#e6edf7">developer     codex   </tspan><tspan fill="#7ee787">up   </tspan><tspan fill="#ffbd2e">  busy 8s</tspan><tspan fill="#e6edf7"> 1     hook     </tspan><tspan fill="#8aa0c0">orchestrator, reviewer</tspan></text>
+    <text x="24" y="260"><tspan fill="#e6edf7">reviewer      claude  </tspan><tspan fill="#7ee787">up   </tspan><tspan fill="#e6edf7">  idle   -      hook     </tspan><tspan fill="#8aa0c0">developer</tspan></text>
+
+    <text x="24" y="300"><tspan fill="#7ee787">$</tspan> <tspan fill="#e6edf7">agentainer queue developer</tspan></text>
+    <text x="24" y="326" fill="#8aa0c0">1 waiting for developer  ·  from reviewer: <tspan fill="#c9d5e6">"nit: rename parse() → tokenize()"</tspan></text>
+  </g>
+</svg>

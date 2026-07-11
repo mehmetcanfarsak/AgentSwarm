@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" width="960" height="600" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" role="img" aria-label="Terminal demo: agentainer up starts four agents, status shows them running, send delivers a task, and logs stream the routed messages.">
+  <defs>
+    <linearGradient id="tbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0c1220"/><stop offset="1" stop-color="#0a0f1c"/>
+    </linearGradient>
+  </defs>
+
+  <!-- window -->
+  <rect width="960" height="600" rx="14" fill="url(#tbg)" stroke="#243352"/>
+  <rect width="960" height="44" rx="14" fill="#111a2e"/>
+  <rect y="30" width="960" height="14" fill="#111a2e"/>
+  <circle cx="26" cy="22" r="7" fill="#ff5f56"/>
+  <circle cx="50" cy="22" r="7" fill="#ffbd2e"/>
+  <circle cx="74" cy="22" r="7" fill="#27c93f"/>
+  <text x="480" y="27" text-anchor="middle" font-size="13" fill="#6a7c99">agentainer — quickstart</text>
+
+  <g font-size="15">
+    <!-- block 1: up -->
+    <g opacity="1">
+      <animate attributeName="opacity" dur="16s" repeatCount="indefinite" values="0;1;1;0" keyTimes="0;0.03;0.94;1"/>
+      <text x="24" y="80"><tspan fill="#7ee787">$</tspan> <tspan fill="#e6edf7">agentainer up</tspan></text>
+      <text x="24" y="104" fill="#79c0ff">:: <tspan fill="#c9d5e6">started </tspan>orchestrator<tspan fill="#6a7c99"> (claude)  session 'orchestrator'</tspan></text>
+      <text x="24" y="126" fill="#79c0ff">:: <tspan fill="#c9d5e6">started </tspan>researcher<tspan fill="#6a7c99">   (claude)  session 'researcher'</tspan></text>
+      <text x="24" y="148" fill="#79c0ff">:: <tspan fill="#c9d5e6">started </tspan>developer<tspan fill="#6a7c99">    (claude)  session 'developer'</tspan></text>
+      <text x="24" y="170" fill="#79c0ff">:: <tspan fill="#c9d5e6">started </tspan>reviewer<tspan fill="#6a7c99">     (claude)  session 'reviewer'</tspan></text>
+      <text x="24" y="192" fill="#79c0ff">:: <tspan fill="#7ee787">swarm 'demo' is up with 4 agent(s)</tspan></text>
+    </g>
+
+    <!-- block 2: status -->
+    <g opacity="1">
+      <animate attributeName="opacity" dur="16s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.28;0.31;0.94;1"/>
+      <text x="24" y="228"><tspan fill="#7ee787">$</tspan> <tspan fill="#e6edf7">agentainer status</tspan></text>
+      <text x="24" y="250" fill="#6a7c99">AGENT         TYPE    STATE  QUEUE  CAN TALK TO</text>
+      <text x="24" y="272"><tspan fill="#e6edf7">orchestrator  claude  </tspan><tspan fill="#7ee787">up</tspan><tspan fill="#6a7c99">     -      researcher, developer, reviewer</tspan></text>
+      <text x="24" y="294"><tspan fill="#e6edf7">researcher    claude  </tspan><tspan fill="#7ee787">up</tspan><tspan fill="#6a7c99">     -      orchestrator, developer</tspan></text>
+      <text x="24" y="316"><tspan fill="#e6edf7">developer     claude  </tspan><tspan fill="#7ee787">up</tspan><tspan fill="#6a7c99">     -      orchestrator, reviewer</tspan></text>
+      <text x="24" y="338"><tspan fill="#e6edf7">reviewer      claude  </tspan><tspan fill="#7ee787">up</tspan><tspan fill="#6a7c99">     -      developer</tspan></text>
+    </g>
+
+    <!-- block 3: send -->
+    <g opacity="1">
+      <animate attributeName="opacity" dur="16s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.52;0.55;0.94;1"/>
+      <text x="24" y="374"><tspan fill="#7ee787">$</tspan> <tspan fill="#e6edf7">agentainer send --to orchestrator </tspan><tspan fill="#d2a8ff">"Build a CLI that converts CSV to Parquet."</tspan></text>
+      <text x="24" y="396" fill="#79c0ff">:: <tspan fill="#c9d5e6">user -&gt; orchestrator: </tspan><tspan fill="#7ee787">delivered</tspan></text>
+    </g>
+
+    <!-- block 4: logs -->
+    <g opacity="1">
+      <animate attributeName="opacity" dur="16s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.68;0.71;0.94;1"/>
+      <text x="24" y="432"><tspan fill="#7ee787">$</tspan> <tspan fill="#e6edf7">agentainer logs -f</tspan></text>
+      <text x="24" y="454"><tspan fill="#6a7c99">03:02:52 </tspan><tspan fill="#e6edf7">orchestrator</tspan><tspan fill="#6a7c99"> received </tspan>user</text>
+      <text x="24" y="476"><tspan fill="#6a7c99">03:02:53 </tspan><tspan fill="#e6edf7">orchestrator</tspan><tspan fill="#6a7c99"> sent </tspan><tspan fill="#22d3ee">developer</tspan></text>
+      <text x="44" y="498" fill="#8aa0c0">Please scaffold the project and the CSV reader.</text>
+      <text x="24" y="520"><tspan fill="#6a7c99">03:02:53 </tspan><tspan fill="#e6edf7">developer</tspan><tspan fill="#6a7c99"> received </tspan>orchestrator</text>
+    </g>
+
+    <!-- blinking cursor -->
+    <rect x="24" y="546" width="10" height="18" fill="#7ee787">
+      <animate attributeName="opacity" values="1;1;0;0" dur="1s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+</svg>

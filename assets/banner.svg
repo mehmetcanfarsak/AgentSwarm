@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 340" width="1280" height="340" font-family="ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" role="img" aria-label="Agentainer — a zero-dependency multi-agent orchestrator for AI coding agents">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1020"/>
+      <stop offset="0.55" stop-color="#0d1424"/>
+      <stop offset="1" stop-color="#111a2e"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#818cf8"/>
+    </linearGradient>
+    <linearGradient id="wordmark" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e6edf7"/>
+      <stop offset="1" stop-color="#a9b6cc"/>
+    </linearGradient>
+    <pattern id="grid" width="34" height="34" patternUnits="userSpaceOnUse">
+      <path d="M34 0H0V34" fill="none" stroke="#1b2740" stroke-width="1"/>
+    </pattern>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="340" rx="20" fill="url(#bg)"/>
+  <rect width="1280" height="340" rx="20" fill="url(#grid)" opacity="0.5"/>
+  <rect x="1" y="1" width="1278" height="338" rx="19" fill="none" stroke="#243352" stroke-width="1.5"/>
+
+  <!-- logo mark: a hub routing to three agent containers -->
+  <g transform="translate(150 170)" filter="url(#glow)">
+    <!-- routing links -->
+    <g stroke="url(#accent)" stroke-width="3" fill="none" opacity="0.85">
+      <path d="M0 0 C 40 -70, 60 -80, 82 -86"/>
+      <path d="M0 0 C 55 0, 60 0, 82 0"/>
+      <path d="M0 0 C 40 70, 60 80, 82 86"/>
+    </g>
+    <!-- hub -->
+    <circle r="20" fill="#0b1020" stroke="url(#accent)" stroke-width="4"/>
+    <circle r="7" fill="url(#accent)"/>
+    <!-- agent containers -->
+    <g fill="#0b1020" stroke="url(#accent)" stroke-width="3">
+      <rect x="86" y="-104" width="42" height="36" rx="8"/>
+      <rect x="86" y="-18"  width="42" height="36" rx="8"/>
+      <rect x="86" y="68"   width="42" height="36" rx="8"/>
+    </g>
+    <g fill="#22d3ee">
+      <circle cx="97" cy="-86" r="4"/><circle cx="97" cy="0" r="4"/><circle cx="97" cy="86" r="4"/>
+    </g>
+  </g>
+
+  <!-- wordmark -->
+  <text x="340" y="150" font-size="76" font-weight="800" letter-spacing="-1" fill="url(#wordmark)">Agentainer</text>
+  <text x="343" y="196" font-size="26" font-weight="600" fill="#22d3ee">Multi-Agent Orchestrator for AI Coding Agents</text>
+  <text x="343" y="232" font-size="20" fill="#8aa0c0">Run Claude Code · Codex · Gemini · Hermes side by side in tmux</text>
+
+  <!-- chips -->
+  <g font-size="15" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <g transform="translate(343 262)">
+      <rect width="182" height="34" rx="17" fill="#0e1a2f" stroke="#2b3d5f"/>
+      <text x="91" y="22" text-anchor="middle" fill="#7ee787">zero dependencies</text>
+    </g>
+    <g transform="translate(539 262)">
+      <rect width="210" height="34" rx="17" fill="#0e1a2f" stroke="#2b3d5f"/>
+      <text x="105" y="22" text-anchor="middle" fill="#79c0ff">Python · bash · tmux</text>
+    </g>
+    <g transform="translate(763 262)">
+      <rect width="150" height="34" rx="17" fill="#0e1a2f" stroke="#2b3d5f"/>
+      <text x="75" y="22" text-anchor="middle" fill="#d2a8ff">one YAML file</text>
+    </g>
+  </g>
+</svg>

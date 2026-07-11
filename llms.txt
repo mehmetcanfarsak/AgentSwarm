@@ -275,6 +275,32 @@ stops at `max_forward_hops`. A message you send with `swarm send` resets it to z
   reproduce → diagnose → fix → verify.
 - `examples/existing-repo.yaml` — two agents pairing inside one existing checkout,
   using `create_workdirs: false` so a wrong path fails instead of being created.
+- `examples/red-team.yaml` — adversarial triad: an attacker and defender argue
+  through a referee over one existing checkout.
+- `examples/debate.yaml` — two advocates argue opposite sides; a judge
+  cross-examines and rules.
+- `examples/writers-room.yaml` — an editor drives a writer, fact-checker and
+  critic to a finished article.
+- `examples/incident-response.yaml` — a commander coordinates an investigator,
+  responder and scribe under time pressure (hub and spoke).
+- `examples/tdd-pingpong.yaml` — a tester and coder grow a feature test-first,
+  one test at a time, via `forward_responses_to`.
+- `examples/brainstorm.yaml` — three idea-generators fan out from a facilitator,
+  then a synthesiser ranks them.
+- `examples/localization.yaml` — translate → review → back-check, auto-forwarded
+  via `forward_responses_to`; a `NEEDS ANOTHER PASS` verdict loops back to
+  the translator with a `<swarm-send>` block.
+- `examples/multi-language-broadcast.yaml` — one translator broadcasts a source to
+  N language reviewers; a consolidator compiles and broadcasts back. Built on
+  `broadcast`.
+- `examples/code-review-broadcast.yaml` — a coordinator broadcasts a PR to
+  specialist reviewers (correctness/security/perf); each replies to the
+  coordinator, who synthesizes. Built on `broadcast`.
+- `examples/ping-pong.yaml` — two agents trade a unit of work, each broadcast
+  naming who is up next (round-robin via `broadcast`, distinct from
+  tdd-pingpong's fixed `forward_responses_to`).
+- `agents.example.yaml` — the fully annotated reference config; every key is
+  documented inline.
 
 ## Recipes
 

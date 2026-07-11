@@ -1,0 +1,127 @@
+# =============================================================================
+# Multi-language broadcast -- one source, several translations in parallel.
+#
+#   agentainer up -c examples/multi-language-broadcast.yaml
+#   agentainer send --to translator "Translate ./docs/quickstart.md to es, fr, de."
+#
+# Shape: a fan-out built on `broadcast`, not `forward_responses_to`. One
+# TRANSLATOR holds the source and fans it out to every reviewer at once; the
+# REVIEWERS each own one language and report back to a single CONSOLIDATOR,
+# who compiles the finished set and broadcasts it back to the translator.
+#
+#        translator
+#            |  (broadcast source to all)
+#            v
+#     +-------+--------+
+#     |       |        |
+#   es-rev  fr-rev  de-rev
+#     |       |        |
+#     +--- consolidator ---+   (each reviewer replies to the consolidator)
+#            |
+#        translator          (consolidator broadcasts the compiled piece back)
+#
+# `broadcast` is the point of this example: the translator reaches several
+# peers with one message and does not care who is busy. Every link is two-way,
+# and the reviewers never talk to each other -- all coordination runs through
+# the translator and the consolidator.
+# =============================================================================
+
+swarm:
+  name: l10n-multi
+  root: ./l10n-multi-workspace
+  session_prefix: "ml-"
+
+  # Broadcasts don't auto-forward, so one hop is all the guard ever needs.
+  max_forward_hops: 1
+
+agents:
+
+  - name: translator
+    type: claude
+    command: "claude --dangerously-skip-permissions"
+
+    # Can reach everyone: broadcasts the source out, and receives the compiled
+    # piece back from the consolidator.
+    can_talk_to: ["es-rev", "fr-rev", "de-rev", "consolidator"]
+
+    first_prompt: |
+      You are the TRANSLATOR and keeper of the source. You start each job with
+      one source document and a list of target languages.
+
+      Produce a single faithful, natural rendering of the source per language, as a
+      native writer would actually say it -- not a word-for-word transposition.
+      Preserve exactly: meaning and tone, markup, code blocks, and placeholders
+      like {name} or %s.
+
+      Then fan it out: broadcast the source text to every reviewer at once so they
+      each translate their own language in parallel. Use:
+
+          <swarm-broadcast>
+          Source (English):
+          ...
+          Translate to your language only. es-rev -> Spanish, fr-rev -> French,
+          de-rev -> German.
+          </swarm-broadcast>
+
+      Wait for the consolidator to return the compiled set, then save each
+      language next to the source (e.g. quickstart.es.md) and finish.
+
+  - name: es-rev
+    type: claude
+    command: "claude --dangerously-skip-permissions"
+    can_talk_to: ["consolidator", "translator"]
+    first_prompt: |
+      You are the SPANISH reviewer. You receive a source text broadcast by the
+      translator and return a faithful, natural Spanish translation of it.
+
+      Preserve meaning, tone, markup, code blocks and placeholders exactly. Read
+      naturally; if the source language shows through, fix it. When done, reply to
+      the consolidator (not the group) with your Spanish text and any term you
+      deliberately did not translate and why.
+
+  - name: fr-rev
+    type: claude
+    command: "claude --dangerously-skip-permissions"
+    can_talk_to: ["consolidator", "translator"]
+    first_prompt: |
+      You are the FRENCH reviewer. You receive a source text broadcast by the
+      translator and return a faithful, natural French translation of it.
+
+      Preserve meaning, tone, markup, code blocks and placeholders exactly. Read
+      naturally; if the source language shows through, fix it. When done, reply to
+      the consolidator (not the group) with your French text and any term you
+      deliberately did not translate and why.
+
+  - name: de-rev
+    type: claude
+    command: "claude --dangerously-skip-permissions"
+    can_talk_to: ["consolidator", "translator"]
+    first_prompt: |
+      You are the GERMAN reviewer. You receive a source text broadcast by the
+      translator and return a faithful, natural German translation of it.
+
+      Preserve meaning, tone, markup, code blocks and placeholders exactly. Read
+      naturally; if the source language shows through, fix it. When done, reply to
+      the consolidator (not the group) with your German text and any term you
+      deliberately did not translate and why.
+
+  - name: consolidator
+    type: claude
+    command: "claude --dangerously-skip-permissions"
+    can_talk_to: ["translator", "es-rev", "fr-rev", "de-rev"]
+    first_prompt: |
+      You are the CONSOLIDATOR. You collect one translation per language from the
+      reviewers and assemble the finished set.
+
+      You will receive several replies -- keep them straight by language. Compile
+      them into one message that lists each language's text. When the set is
+      complete, broadcast it back to the translator so they can save the files:
+
+          <swarm-broadcast>
+          Compiled translations:
+          Spanish:  ...
+          French:   ...
+          German:   ...
+          </swarm-broadcast>
+
+      Do not edit the translations; your job is to gather, not to re-translate.

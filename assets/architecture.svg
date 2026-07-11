@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 560" width="1180" height="560" font-family="ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" role="img" aria-label="Agentainer architecture: one YAML file maps each agent to its own tmux session and working directory; Agentainer routes and logs messages between them under a can_talk_to access-control list.">
+  <defs>
+    <linearGradient id="abg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1020"/><stop offset="1" stop-color="#111a2e"/>
+    </linearGradient>
+    <linearGradient id="aacc" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#818cf8"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#22d3ee"/>
+    </marker>
+    <pattern id="agrid" width="34" height="34" patternUnits="userSpaceOnUse">
+      <path d="M34 0H0V34" fill="none" stroke="#16213a" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1180" height="560" rx="18" fill="url(#abg)"/>
+  <rect width="1180" height="560" rx="18" fill="url(#agrid)" opacity="0.6"/>
+  <rect x="1" y="1" width="1178" height="558" rx="17" fill="none" stroke="#243352"/>
+
+  <text x="40" y="52" font-size="24" font-weight="800" fill="#e6edf7">How Agentainer fits together</text>
+  <text x="40" y="80" font-size="15" fill="#8aa0c0">One config file → one tmux session + one working directory per agent → routed, permission-checked, logged messages.</text>
+
+  <!-- 1. YAML config -->
+  <g transform="translate(40 120)">
+    <rect width="270" height="360" rx="14" fill="#0e1a2f" stroke="#2b3d5f"/>
+    <text x="20" y="34" font-size="15" font-weight="700" fill="#22d3ee">agents.yaml</text>
+    <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" fill="#c9d5e6">
+      <text x="20" y="72">swarm:</text>
+      <text x="34" y="94" fill="#8aa0c0">root: ./workspace</text>
+      <text x="20" y="126">agents:</text>
+      <text x="34" y="148">- name: <tspan fill="#7ee787">orchestrator</tspan></text>
+      <text x="46" y="168" fill="#8aa0c0">can_talk_to: "*"</text>
+      <text x="34" y="196">- name: <tspan fill="#7ee787">researcher</tspan></text>
+      <text x="46" y="216" fill="#8aa0c0">can_talk_to: [dev]</text>
+      <text x="34" y="244">- name: <tspan fill="#7ee787">developer</tspan></text>
+      <text x="46" y="264" fill="#8aa0c0">can_talk_to: [rev]</text>
+      <text x="34" y="292">- name: <tspan fill="#7ee787">reviewer</tspan></text>
+      <text x="46" y="312" fill="#8aa0c0">can_talk_to: [dev]</text>
+    </g>
+    <text x="20" y="346" font-size="12.5" fill="#79c0ff">agentainer up</text>
+  </g>
+
+  <!-- big arrow -->
+  <line x1="320" y1="300" x2="392" y2="300" stroke="#22d3ee" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+  <!-- 2. tmux sessions (agent containers) -->
+  <g transform="translate(410 120)">
+    <rect width="430" height="360" rx="14" fill="#0c1526" stroke="#2b3d5f"/>
+    <text x="20" y="34" font-size="15" font-weight="700" fill="#818cf8">tmux — one session per agent</text>
+
+    <!-- agent cards -->
+    <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+      <g transform="translate(24 56)">
+        <rect width="180" height="118" rx="10" fill="#0e1a2f" stroke="#3a4d73"/>
+        <circle cx="18" cy="22" r="5" fill="#7ee787"/>
+        <text x="34" y="27" font-size="14" font-weight="700" fill="#e6edf7">orchestrator</text>
+        <text x="16" y="54" font-size="11.5" fill="#8aa0c0">claude</text>
+        <text x="16" y="76" font-size="11.5" fill="#8aa0c0">workspace/</text>
+        <text x="16" y="94" font-size="11.5" fill="#8aa0c0">  orchestrator/</text>
+      </g>
+      <g transform="translate(226 56)">
+        <rect width="180" height="118" rx="10" fill="#0e1a2f" stroke="#3a4d73"/>
+        <circle cx="18" cy="22" r="5" fill="#7ee787"/>
+        <text x="34" y="27" font-size="14" font-weight="700" fill="#e6edf7">researcher</text>
+        <text x="16" y="54" font-size="11.5" fill="#8aa0c0">gemini</text>
+        <text x="16" y="76" font-size="11.5" fill="#8aa0c0">workspace/</text>
+        <text x="16" y="94" font-size="11.5" fill="#8aa0c0">  researcher/</text>
+      </g>
+      <g transform="translate(24 190)">
+        <rect width="180" height="118" rx="10" fill="#0e1a2f" stroke="#3a4d73"/>
+        <circle cx="18" cy="22" r="5" fill="#7ee787"/>
+        <text x="34" y="27" font-size="14" font-weight="700" fill="#e6edf7">developer</text>
+        <text x="16" y="54" font-size="11.5" fill="#8aa0c0">codex</text>
+        <text x="16" y="76" font-size="11.5" fill="#8aa0c0">workspace/</text>
+        <text x="16" y="94" font-size="11.5" fill="#8aa0c0">  developer/</text>
+      </g>
+      <g transform="translate(226 190)">
+        <rect width="180" height="118" rx="10" fill="#0e1a2f" stroke="#3a4d73"/>
+        <circle cx="18" cy="22" r="5" fill="#7ee787"/>
+        <text x="34" y="27" font-size="14" font-weight="700" fill="#e6edf7">reviewer</text>
+        <text x="16" y="54" font-size="11.5" fill="#8aa0c0">claude</text>
+        <text x="16" y="76" font-size="11.5" fill="#8aa0c0">workspace/</text>
+        <text x="16" y="94" font-size="11.5" fill="#8aa0c0">  reviewer/</text>
+      </g>
+    </g>
+
+    <!-- can_talk_to links between agents -->
+    <g stroke="url(#aacc)" stroke-width="2" fill="none" opacity="0.8">
+      <line x1="204" y1="115" x2="226" y2="115" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+      <line x1="114" y1="174" x2="114" y2="190" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+      <line x1="204" y1="249" x2="226" y2="249" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+    </g>
+  </g>
+
+  <!-- arrow to router -->
+  <line x1="850" y1="300" x2="922" y2="300" stroke="#22d3ee" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+  <!-- 3. router / logs -->
+  <g transform="translate(940 120)">
+    <rect width="200" height="360" rx="14" fill="#0e1a2f" stroke="#2b3d5f"/>
+    <text x="20" y="34" font-size="15" font-weight="700" fill="#22d3ee">Agentainer core</text>
+    <g font-size="13" fill="#c9d5e6">
+      <text x="20" y="74">✓ turn-complete</text>
+      <text x="34" y="94" fill="#8aa0c0">hooks + polling</text>
+      <text x="20" y="128">✓ can_talk_to</text>
+      <text x="34" y="148" fill="#8aa0c0">permission ACL</text>
+      <text x="20" y="182">✓ queue if busy</text>
+      <text x="34" y="202" fill="#8aa0c0">back-pressure</text>
+      <text x="20" y="236">✓ resume</text>
+      <text x="34" y="256" fill="#8aa0c0">after a restart</text>
+      <text x="20" y="300">✓ event log</text>
+      <text x="34" y="320" fill="#8aa0c0">.swarm/logs/*.jsonl</text>
+    </g>
+  </g>
+</svg>

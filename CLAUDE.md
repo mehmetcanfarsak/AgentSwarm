@@ -94,3 +94,105 @@ Never commit or ship `.swarm/`, `workspace/`, example `*-workspace/` /
   that embed API keys — treat agent `command` strings as sensitive.
 - `--dangerously-skip-permissions` / `--yolo` run agent tools unsupervised, so
   a swarm's `root` should point at a disposable directory.
+
+## README & marketing assets
+
+The `README.md` doubles as the project's landing page, so it is written for
+**discovery** (SEO + LLM answer engines) as well as for readers. Keep these
+conventions when editing it:
+
+- **Structure that ranks.** Keyword-rich H1 ("Multi-Agent Orchestrator for AI
+  Coding Agents"), a plain-language one-paragraph definition directly under it
+  (models can quote it verbatim), a **Table of contents**, and an **FAQ**
+  section of natural-question Q&A (the format answer engines extract). Preserve
+  these when restructuring — don't collapse the FAQ or drop the intro paragraph.
+- **Never change the technical substance for style.** All config tables
+  (`swarm:`/`agents:`/`agent_types:`/`defaults:`), capture mechanics, footguns,
+  the examples matrix, and troubleshooting are load-bearing. Marketing edits are
+  additive framing (headings, emoji section markers, badges, images) only.
+
+Visual assets live in **`assets/`** (committed to git; *not* shipped to npm —
+the `files` allowlist is source-only, which is fine because the README
+references them by absolute URL). They are **hand-authored SVGs**, consistent
+with the zero-dependency ethos — no PNG/GIF pipeline, no asciinema/vhs/agg:
+
+| File | Purpose |
+|------|---------|
+| `assets/banner.svg` | Top-of-README brand banner (logo mark + wordmark + tagline + feature chips) |
+| `assets/demo.svg` | Looping terminal "cast" of the quickstart (`up`→`status`→`send`→`logs`), SMIL-animated |
+| `assets/architecture.svg` | The "how it fits together" diagram (YAML → tmux sessions → core routing) |
+| `assets/screenshot-status.svg` | Terminal-styled `status`/`queue` output |
+
+Rules for these assets:
+
+- **Reference them with absolute `raw.githubusercontent.com/.../main/assets/...`
+  URLs**, never relative paths — relative paths break on the npmjs.com package
+  page. Every `<img>` needs descriptive `alt` text (accessibility + indexing).
+- **Terminal SVGs must show real output.** The demo/screenshot text was captured
+  by running an actual mock swarm (`./agentainer up/status/send/logs` against a
+  throwaway config with `command: "bash -c '…read…'"` agents — no API keys). Do
+  not invent output; re-capture if the CLI's format changes.
+- **Animations degrade gracefully.** `demo.svg` uses SMIL with base
+  `opacity="1"` so that if a renderer strips animation, the full transcript is
+  still visible. GitHub renders animated SVGs via its camo proxy.
+- **Text must fit its box.** SVG has no auto-layout — a label wider than its
+  pill/rect silently overflows into neighbors. When editing, sanity-check widths
+  (mono ≈ 0.6em/char) and that XML is well-formed
+  (`python3 -c "import xml.dom.minidom; xml.dom.minidom.parse('assets/x.svg')"`).
+- Prefer SVG over binary images for anything that is essentially text
+  (diagrams, terminals): crisp at any DPI, tiny, and the text stays indexable.
+- Keep a plain-text fallback for diagrams (e.g. the ASCII architecture art in a
+  `<details>` block) for terminals and screen readers.
+
+### How these were produced (reproducible recipe)
+
+No design tools were used — the SVGs were written by hand and the terminal text
+was captured from the real CLI. To reproduce or refresh them:
+
+1. **Capture real CLI output** (no API keys — mock agents are just bash loops).
+   Run a throwaway swarm and copy the actual `up`/`status`/`send`/`logs` text
+   into the terminal SVGs:
+   ```bash
+   cat > /tmp/demo-swarm.yaml <<'Y'
+   swarm: {name: demo, root: /tmp/demo-workspace}
+   agents:
+     - {name: orchestrator, type: claude, capture: none, can_talk_to: "*",
+        command: "bash -c 'while true; do read -r l || sleep 1; done'"}
+     - {name: researcher, type: claude, capture: none, can_talk_to: [orchestrator, developer],
+        command: "bash -c 'while true; do read -r l || sleep 1; done'"}
+     - {name: developer, type: claude, capture: none, can_talk_to: [orchestrator, reviewer],
+        command: "bash -c 'while true; do read -r l || sleep 1; done'"}
+     - {name: reviewer, type: claude, capture: none, can_talk_to: [developer],
+        command: "bash -c 'while true; do read -r l || sleep 1; done'"}
+   Y
+   ./agentainer up      -c /tmp/demo-swarm.yaml --no-prompt
+   ./agentainer status  -c /tmp/demo-swarm.yaml
+   ./agentainer send    -c /tmp/demo-swarm.yaml --to orchestrator "Build a CLI that converts CSV to Parquet."
+   ./agentainer logs    -c /tmp/demo-swarm.yaml -n 12
+   ./agentainer down    -c /tmp/demo-swarm.yaml
+   ```
+   (`--help` and `validate -c examples/research-swarm.yaml` give the other real
+   strings.) The config lives in `/tmp`, so nothing lands in the repo.
+
+2. **Hand-author the SVGs** into `assets/` with the `Write` tool — no libraries.
+   Shared visual language: dark terminal bg (`#0c1220`/`#0a0f1c`), grid overlay
+   (`<pattern>`), accent gradient cyan→indigo (`#22d3ee`→`#818cf8`), traffic-light
+   window dots (`#ff5f56`/`#ffbd2e`/`#27c93f`), monospace stack `ui-monospace,
+   SFMono-Regular, Menlo, Consolas, monospace`. Give each `<svg>` a `role="img"`
+   and `aria-label`. Colour terminal text with `<tspan fill=…>`.
+
+3. **Animate with SMIL, not CSS/JS.** In `demo.svg` each command block is a `<g>`
+   with base `opacity="1"` plus an `<animate attributeName="opacity"
+   repeatCount="indefinite" values="0;…;1;…;0" keyTimes=…>` — staggered
+   `keyTimes` reveal blocks in sequence and the loop resets together. Base
+   opacity 1 is the graceful-degradation fallback.
+
+4. **Verify before wiring in.** SVG has no auto-layout, so check both:
+   ```bash
+   for f in assets/*.svg; do python3 -c "import xml.dom.minidom; xml.dom.minidom.parse('$f')" \
+     && echo "OK $f" || echo "BAD $f"; done
+   ```
+   and eyeball that every text label fits its box (mono ≈ 0.6em/char; a label
+   wider than its pill/rect overflows silently into its neighbours — the common
+   bug). Then reference each from `README.md` by absolute `raw.githubusercontent`
+   URL with `alt` text.

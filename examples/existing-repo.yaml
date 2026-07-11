@@ -5,6 +5,8 @@
 # existing checkout, so they see each other's edits immediately -- a driver who
 # writes the code and a navigator who reads it as it lands.
 #
+#   driver <--> navigator      (a two-way pair sharing one checkout)
+#
 #   1. Point `workdir` below at a real repository.
 #   2. agentainer validate -c examples/existing-repo.yaml
 #   3. agentainer up       -c examples/existing-repo.yaml

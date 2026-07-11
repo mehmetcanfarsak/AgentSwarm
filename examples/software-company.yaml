@@ -8,6 +8,19 @@
 # The communication graph is deliberately not a free-for-all: developers talk to
 # their architect and to QA, but not to each other, so design decisions go
 # through one place instead of being negotiated twice.
+#
+#   cto <--> everyone      (the hub: architect, backend, frontend, qa, docs)
+#
+# On the dev side the four form a diamond -- every link two-way:
+#
+#            architect
+#            /        \
+#       backend      frontend
+#            \        /
+#               qa
+#
+# ...but backend and frontend never talk to each other, and docs talks only
+# to the cto.
 # =============================================================================
 
 swarm:
@@ -149,4 +162,6 @@ agents:
 
       Every entry answers: what changed, and what should a user do differently
       because of it. No marketing language. When you need to know why something
-      changed, ask the cto.
+      changed, ask the cto from your shell (your replies are not auto-captured,
+      so a tagged block would not be delivered):
+        swarm send --to cto "..."

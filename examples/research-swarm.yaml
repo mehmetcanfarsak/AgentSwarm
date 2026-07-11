@@ -7,6 +7,15 @@
 # Shape: hub and spoke. The lead hands out work and assembles the result; the
 # specialists only ever report back to the lead (and to each other where it
 # actually helps). Nobody starts working until the lead briefs them.
+#
+#                     writer
+#                       |
+#      scout -------- lead -------- analyst
+#         \                        /
+#          `---- (compare notes) --'
+#
+# Every link is two-way. The lead is the hub; scout and analyst may also talk
+# to each other directly, but the writer only ever deals with the lead.
 # =============================================================================
 
 swarm:
