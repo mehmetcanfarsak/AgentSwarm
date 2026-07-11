@@ -1,0 +1,41 @@
+name: Bug report
+description: Report a problem running or configuring a swarm
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Config you ran
+      description: Paste the swarm YAML (redact any API keys or sensitive command strings).
+      render: yaml
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: agentainer command
+      description: The exact command you ran (e.g. `agentainer up -c my.yaml`).
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output
+      description: Output of `agentainer status` and `agentainer logs -n 30`, and `.swarm/logs/hooks.log` if capture misbehaves.
+      render: shell
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Agentainer version
+      description: Output of `agentainer --version` (or the npm package version).
+    validations:
+      required: false

@@ -1,0 +1,48 @@
+# =============================================================================
+# Quickstart swarm -- copy this, run it, watch agents route messages.
+#
+#   cp quickstart.yaml my-swarm.yaml
+#   agentainer up    -c my-swarm.yaml --no-prompt
+#   agentainer status -c my-swarm.yaml
+#   agentainer send  -c my-swarm.yaml --to orchestrator "Build a CLI that converts CSV to Parquet."
+#   agentainer logs  -c my-swarm.yaml -f
+#   agentainer down  -c my-swarm.yaml
+#
+# The `command:` lines run a tiny bash loop instead of a real agent CLI, so the
+# swarm comes up and routes messages with NO API keys and NO model calls -- it is
+# a safe way to feel the mechanics (up / status / send / logs). To run real
+# agents, swap each `command` for the actual CLI you installed (see
+# examples/research-swarm.yaml) and drop capture: none so turns get captured.
+#
+# Shape: orchestrator fans out to researcher + developer; developer asks reviewer.
+# =============================================================================
+
+swarm:
+  name: quickstart
+  root: ./quickstart-workspace
+
+defaults:
+  capture: none          # mock agents don't fire a turn-completion hook
+  can_talk_to: []        # tightened per agent below
+
+agents:
+  - name: orchestrator
+    type: claude
+    can_talk_to: "*"
+    command: "bash -c 'while true; do read -r l || sleep 1; done'"
+    first_prompt: "You are the orchestrator. Wait for the user's task, then delegate."
+
+  - name: researcher
+    type: gemini
+    can_talk_to: [orchestrator, developer]
+    command: "bash -c 'while true; do read -r l || sleep 1; done'"
+
+  - name: developer
+    type: codex
+    can_talk_to: [orchestrator, reviewer]
+    command: "bash -c 'while true; do read -r l || sleep 1; done'"
+
+  - name: reviewer
+    type: claude
+    can_talk_to: [developer]
+    command: "bash -c 'while true; do read -r l || sleep 1; done'"

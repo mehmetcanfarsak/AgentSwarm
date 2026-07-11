@@ -1,17 +1,24 @@
 {
   "name": "agentainer",
   "version": "0.1.3",
-  "description": "Run a configurable swarm of coding-agent CLIs (Claude Code, Codex, Gemini) in tmux and let them talk to each other.",
+  "description": "Zero-dependency multi-agent orchestrator: run a team of AI coding agents (Claude Code, Codex, Gemini, Hermes) side by side in tmux with a YAML-defined ACL.",
   "keywords": [
     "agents",
+    "ai-agents",
     "ai",
+    "llm",
+    "agentic",
+    "claude-code",
     "claude",
     "codex",
     "gemini",
+    "hermes",
     "tmux",
     "orchestration",
     "multi-agent",
-    "swarm"
+    "swarm",
+    "prompt-routing",
+    "python"
   ],
   "homepage": "https://github.com/mehmetcanfarsak/AgentSwarm#readme",
   "bugs": {
