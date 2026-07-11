@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref to save minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install tmux (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Install tmux (macOS)
+        if: runner.os == 'macOS'
+        run: brew install tmux
+
+      - name: Print tool versions
+        run: |
+          python3 --version
+          node --version
+          tmux -V
+          bash --version | head -1
+
+      - name: Byte-compile Python (stdlib only, no runtime deps)
+        run: python3 -m compileall -q lib/
+
+      - name: Dependency doctor
+        run: node scripts/check-deps.js
+
+      - name: Validate self-contained example configs
+        run: |
+          set -e
+          # existing-repo.yaml intentionally points at a user-supplied workdir
+          # that does not exist in CI, so it is validated separately below.
+          for f in agents.example.yaml examples/bug-hunt.yaml \
+                   examples/research-swarm.yaml examples/software-company.yaml; do
+            echo "== validate $f =="
+            ./agentainer validate -c "$f"
+          done
+
+      - name: Validate existing-repo.yaml template (expected to flag missing workdir)
+        run: |
+          if ./agentainer validate -c examples/existing-repo.yaml; then
+            echo "unexpected: existing-repo.yaml validated without its external workdir" >&2
+            exit 1
+          fi
+          echo "ok: template correctly reports the missing user workdir"
+
+      - name: Run full validation suite (mock agents, no API keys)
+        run: tests/validate.sh
+
+  lint:
+    name: lint (shell + python syntax)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python syntax check
+        run: python3 -m compileall -q lib/ hooks/ 2>/dev/null || python3 -m compileall -q lib/
+
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: "."
+          # SC1091: sourced files not resolvable in CI; SC2016: intentional literal
+          # single-quoted $VAR in heredocs sent to remote panes.
+          additional_files: agentainer
+          format: gcc
+        env:
+          SHELLCHECK_OPTS: -e SC1091 -e SC2016
