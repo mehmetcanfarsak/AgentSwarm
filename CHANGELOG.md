@@ -4,6 +4,19 @@ All notable changes to Agentainer are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.7]
+
+### Fixed
+- **Green CI.** The GitHub Actions pipeline had been failing on every run. The
+  `test` job's `validate.sh` hard-required PyYAML for its parser-parity checks
+  (a fresh runner has none); those now `SKIP` gracefully so a pure-stdlib clone
+  passes, while the matrix installs PyYAML to actually run them. The `lint` job's
+  18 ShellCheck findings in `validate.sh` are all resolved.
+
+### CI
+- Matrix installs PyYAML (test-only) so parser-parity checks run; a new
+  stdlib-only job proves the zero-dependency `minyaml` fallback end to end.
+
 ## [0.1.6]
 
 ### Added
