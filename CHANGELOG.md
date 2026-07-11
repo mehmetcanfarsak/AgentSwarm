@@ -4,6 +4,27 @@ All notable changes to Agentainer are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.5]
+
+### Added
+- Background **liveness supervisor** (started at `up`; `swarm.supervise` /
+  `supervise_interval_ms`, default 15s) that reconciles stale-busy and dead
+  agents on a timer so one silent agent cannot wedge the swarm. `status` reports
+  whether it is alive; `down` stops it.
+- `up` now nudges that resumed agents sit idle until messaged.
+
+### Changed
+- `capture: none` on a hook-backed type (claude/codex) is auto-upgraded to
+  `capture: hook` at load time (with a warning); gemini/hermes keep `none`.
+
+### Fixed
+- `resume_args` / `resume_command` now fall back through `defaults`, not just the
+  agent/type.
+
+### Tests
+- Expanded the mock suite to keep `lib/` at 100% line coverage (411 pytest
+  cases, 50 `validate.sh` checks).
+
 ## [0.1.4]
 
 ### Added
