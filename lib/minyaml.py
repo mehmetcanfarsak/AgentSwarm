@@ -37,6 +37,13 @@ _KEY_RE = re.compile(
 
 _BLOCK_RE = re.compile(r"^([|>])([+-]?)(\d*)$")
 
+# Only plain base-10 numbers are coerced. Leaving leading-zero ("010"), hex/octal
+# ("0x1F"), bare-exponent ("1e3") and underscore ("1_000") tokens as strings keeps
+# the builtin parser from silently inventing a value that PyYAML would not -- the
+# ambiguous octal/exponent cases are exactly where the two would otherwise disagree.
+_INT_RE = re.compile(r"^[-+]?(?:0|[1-9][0-9]*)$")
+_FLOAT_RE = re.compile(r"^[-+]?(?:[0-9]*\.[0-9]+|[0-9]+\.[0-9]*)(?:[eE][-+][0-9]+)?$")
+
 _UNSUPPORTED = ("&", "*", "!!", "---", "...")
 
 
@@ -206,14 +213,10 @@ def _scalar(raw: str):
         return True
     if low in ("false", "no", "off"):
         return False
-    try:
-        return int(s, 10)
-    except ValueError:
-        pass
-    try:
+    if _INT_RE.match(s):
+        return int(s)
+    if _FLOAT_RE.match(s):
         return float(s)
-    except ValueError:
-        pass
     return s
 
 
