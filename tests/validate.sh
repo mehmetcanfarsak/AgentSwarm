@@ -9,10 +9,22 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SW="$REPO/agentainer"
 export PYTHONPATH="$REPO/lib"   # quoted heredocs cannot expand $REPO themselves
 T="${TMPDIR:-/tmp}/agentswarm-validate.$$"
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 ok()   { PASS=$((PASS+1)); printf "  \033[32mPASS\033[0m %s\n" "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf "  \033[31mFAIL\033[0m %s   %s\n" "$1" "$2"; }
+skip() { SKIP=$((SKIP+1)); printf "  \033[33mSKIP\033[0m %s\n" "$1"; }
 check(){ if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected [$3] got [$2]"; fi; }
+# Count reminder files in an inbox dir. find (not ls) handles odd names, and the
+# tr strips the leading padding BSD/macOS `wc -l` prints so comparisons are exact.
+count_msgs() { find "$1" -maxdepth 1 -name '*from-swarm*' 2>/dev/null | wc -l | tr -d '[:space:]'; }
+# Echo "0" if the path is a regular file, else "1" -- lets `check` assert on file
+# existence without reading $? off a `test` (which ShellCheck flags as SC2319).
+isfile() { if [ -f "$1" ]; then echo 0; else echo 1; fi; }
+
+# The parser-parity checks compare the bundled minyaml against PyYAML, so they
+# only run when PyYAML is importable. Agentainer itself never requires it (the
+# whole point of minyaml), so a pure-stdlib run skips them instead of failing.
+if python3 -c "import yaml" 2>/dev/null; then HAVE_YAML=1; else HAVE_YAML=0; fi
 
 rm -rf "$T"; mkdir -p "$T"; cd "$T" || exit 1
 trap 'rm -rf "$T"; tmux kill-server 2>/dev/null' EXIT
@@ -84,7 +96,8 @@ check "can_talk_to '*' expands" "$peers" "b,c"
 
 # ------------------------------------------------------------------ yaml layer
 echo "== yaml =="
-n_bad=$(python3 -c "
+if [ "$HAVE_YAML" = 1 ]; then
+    n_bad=$(python3 -c "
 import sys, glob; sys.path.insert(0,'$REPO/lib')
 import yaml, minyaml
 bad=[]
@@ -102,14 +115,18 @@ for f in ['$REPO/agents.example.yaml']+sorted(glob.glob('$REPO/examples/*.yaml')
         bad.append(f)
 print(len(bad))
 ")
-[ "$n_bad" = "0" ] && ok "minyaml == pyyaml on every shipped config" || bad "parser parity" ""
+    if [ "$n_bad" = "0" ]; then ok "minyaml == pyyaml on every shipped config"; else bad "parser parity" ""; fi
 
-python3 -c "
+    if python3 -c "
 import sys; sys.path.insert(0,'$REPO/lib')
 import swarm, yaml
 d = swarm.yaml_dump({'a':'q\" \\\\ b','b':None,'c':{'x':1},'d':{}})
 assert yaml.safe_load(d) == {'a':'q\" \\\\ b','b':None,'c':{'x':1},'d':{}}, yaml.safe_load(d)
-" && ok "yaml emitter round-trips (quotes, backslash, null, empty)" || bad "yaml emitter" ""
+"; then ok "yaml emitter round-trips (quotes, backslash, null, empty)"; else bad "yaml emitter" ""; fi
+else
+    skip "minyaml == pyyaml on every shipped config (PyYAML not installed)"
+    skip "yaml emitter round-trips (PyYAML not installed)"
+fi
 
 # ------------------------------------------------------------- unit: transcript
 echo "== transcript extraction =="
@@ -131,7 +148,7 @@ check "sidechain skipped, latest turn returned" "$r" "TURN2"
 
 # ----------------------------------------------------------------- unit: tags
 echo "== tag parser =="
-python3 - <<'PY'
+if python3 - <<'PY'
 import sys; sys.path.insert(0,'$REPO/lib'); import swarm
 m,r,p = swarm.parse_outbound('x<swarm-send to="a">hi</swarm-send>y')
 assert len(m)==1 and m[0].to=="a" and m[0].expects_reply and r=="xy", (m,r)
@@ -156,7 +173,7 @@ m,r,p = swarm.parse_outbound('<swarm-send to="a">body with no closing tag')
 assert not m and p, p
 print("OK")
 PY
-[ $? -eq 0 ] && ok "parse_outbound: send/broadcast/expects-reply/unclosed/empty/quotes" || bad "parse_outbound" ""
+then ok "parse_outbound: send/broadcast/expects-reply/unclosed/empty/quotes"; else bad "parse_outbound" ""; fi
 
 # --------------------------------------------------------------- runtime setup
 echo "== runtime =="
@@ -210,10 +227,8 @@ check "swarm idle forces an agent idle" "$?" "0"
 
 # concurrency: 5 parallel senders, exactly one wins
 "$SW" idle -c s.yaml B >/dev/null 2>&1
-before=$(grep -c "swarm-message" ws/B/received.txt)
 for i in 1 2 3 4 5; do SWARM_AGENT=A "$SW" send -c s.yaml --to B "race$i" >/dev/null 2>&1 & done
 wait; sleep 1
-after=$(grep -c 'from="A"' ws/B/received.txt)
 delivered=$(grep -c "race" ws/B/received.txt)
 check "TOCTOU: exactly one of 5 concurrent sends delivered" "$delivered" "1"
 "$SW" down -c s.yaml >/dev/null 2>&1
@@ -224,7 +239,7 @@ rm -rf ws; "$SW" up -c s.yaml --no-prompt >/dev/null 2>&1; sleep 1
 mkjson '<swarm-send to="B">PING</swarm-send>' > ping.jsonl
 turn A "$T/ping.jsonl" ws s.yaml >/dev/null 2>&1
 grep -q "PING" ws/B/received.txt; check "outbound tag routed A -> B" "$?" "0"
-test -f ws/.swarm/run/B.pending.json; check "opening message creates a reply obligation" "$?" "0"
+check "opening message creates a reply obligation" "$(isfile ws/.swarm/run/B.pending.json)" "0"
 
 mkjson '<swarm-send to="A">sneak</swarm-send>' > sneak.jsonl
 turn C "$T/sneak.jsonl" ws s.yaml >/dev/null 2>&1
@@ -235,8 +250,8 @@ import json
 print([json.loads(l)['id'] for l in open('$T/ws/.swarm/logs/B.jsonl') if json.loads(l)['kind']=='received'][-1])")
 mkjson "<swarm-send to=\"A\" reply-to=\"$id\">PONG</swarm-send>" > pong.jsonl
 turn B "$T/pong.jsonl" ws s.yaml >/dev/null 2>&1
-test -f ws/.swarm/run/B.pending.json; check "answering clears the obligation" "$?" "1"
-test -f ws/.swarm/run/A.pending.json; check "a reply-to message creates no new obligation" "$?" "1"
+check "answering clears the obligation" "$(isfile ws/.swarm/run/B.pending.json)" "1"
+check "a reply-to message creates no new obligation" "$(isfile ws/.swarm/run/A.pending.json)" "1"
 
 # reminder: silent turn
 "$SW" idle -c s.yaml A >/dev/null 2>&1; "$SW" idle -c s.yaml B >/dev/null 2>&1
@@ -244,11 +259,11 @@ mkjson '<swarm-send to="B">Q2</swarm-send>' > q2.jsonl
 turn A "$T/q2.jsonl" ws s.yaml >/dev/null 2>&1
 mkjson 'prose only, no tag' > prose.jsonl
 turn B "$T/prose.jsonl" ws s.yaml >/dev/null 2>&1
-n=$(ls ws/.swarm/inbox/B/*from-swarm* 2>/dev/null | wc -l)
+n=$(count_msgs ws/.swarm/inbox/B)
 check "silent turn triggers exactly one reminder" "$n" "1"
 turn B "$T/prose.jsonl" ws s.yaml >/dev/null 2>&1
 turn B "$T/prose.jsonl" ws s.yaml >/dev/null 2>&1
-n=$(ls ws/.swarm/inbox/B/*from-swarm* 2>/dev/null | wc -l)
+n=$(count_msgs ws/.swarm/inbox/B)
 check "gives up after max_reply_reminders" "$n" "1"
 
 # malformed tag -> send_failed
@@ -274,7 +289,7 @@ turn B "$T/silent.jsonl" ws s.yaml >/dev/null 2>&1
 sleep 1
 grep -q "queued mail" ws/B/received.txt
 check "queued mail beats the reminder" "$?" "0"
-n=$(ls ws/.swarm/inbox/B/*from-swarm* 2>/dev/null | wc -l)
+n=$(count_msgs ws/.swarm/inbox/B)
 check "no reminder while mail was waiting" "$n" "0"
 "$SW" down -c s.yaml >/dev/null 2>&1
 
@@ -292,22 +307,27 @@ mkjson '<swarm-send to="ghost">x</swarm-send>' > ghost2.jsonl
 turn A "$T/ghost2.jsonl" tw two_rem.yaml >/dev/null 2>&1   # nudge 1: send_failed, pending has no sender
 "$SW" idle -c two_rem.yaml A --no-drain >/dev/null 2>&1
 turn A "$T/ghost2.jsonl" tw two_rem.yaml >/dev/null 2>&1   # nudge 2: still malformed
-last=$(ls -t tw/.swarm/inbox/A/*from-swarm*.md 2>/dev/null | head -1)
-n=$(ls tw/.swarm/inbox/A/*from-swarm* 2>/dev/null | wc -l)
+# newest reminder by mtime, without ls -t (portable, handles odd names)
+last=""
+for f in tw/.swarm/inbox/A/*from-swarm*.md; do
+    [ -e "$f" ] || continue
+    if [ -z "$last" ] || [ "$f" -nt "$last" ]; then last="$f"; fi
+done
+n=$(count_msgs tw/.swarm/inbox/A)
 check "second nudge sent (max_reply_reminders=2)" "$n" "2"
 grep -q "waiting on your answer" "$last" 2>/dev/null
 check "no phantom 'someone is waiting' when nobody asked" "$?" "1"
 
 "$SW" idle -c two_rem.yaml A --no-drain >/dev/null 2>&1
 turn A "$T/ghost2.jsonl" tw two_rem.yaml >/dev/null 2>&1   # third: must give up
-n=$(ls tw/.swarm/inbox/A/*from-swarm* 2>/dev/null | wc -l)
+n=$(count_msgs tw/.swarm/inbox/A)
 check "gives up after the last nudge" "$n" "2"
 
 # a quiet turn owing nothing, with nothing broken, is never nudged
 "$SW" idle -c two_rem.yaml A --no-drain >/dev/null 2>&1
 mkjson 'quiet, nothing to send' > quiet.jsonl
 turn A "$T/quiet.jsonl" tw two_rem.yaml >/dev/null 2>&1
-n=$(ls tw/.swarm/inbox/A/*from-swarm* 2>/dev/null | wc -l)
+n=$(count_msgs tw/.swarm/inbox/A)
 check "a quiet turn owing nothing is never nudged" "$n" "2"
 "$SW" down -c two_rem.yaml >/dev/null 2>&1
 
@@ -336,15 +356,18 @@ check "swept queue is emptied" "$q" "0 message"
 # ------------------------------------------------------------------- sessions
 echo "== sessions / resume =="
 rm -rf ws; "$SW" up -c s.yaml --no-prompt >/dev/null 2>&1; sleep 1
-( cd ws/A && echo '{"session_id":"sess-aaa","transcript_path":"'$T'/done.jsonl"}' | SWARM_CONFIG="$T/s.yaml" SWARM_AGENT=A "$SW" hook claude >/dev/null 2>&1 )
+( cd ws/A && echo '{"session_id":"sess-aaa","transcript_path":"'"$T"'/done.jsonl"}' | SWARM_CONFIG="$T/s.yaml" SWARM_AGENT=A "$SW" hook claude >/dev/null 2>&1 )
 grep -q 'session_id: "sess-aaa"' ws/.swarm/sessions.yaml
 check "claude session id recorded" "$?" "0"
-python3 -c "
+if [ "$HAVE_YAML" = 1 ]; then
+    if python3 -c "
 import sys; sys.path.insert(0,'$REPO/lib')
 import yaml, minyaml
 t=open('$T/ws/.swarm/sessions.yaml').read()
-assert yaml.safe_load(t)==minyaml.load(t)"
-check "sessions.yaml parses with both parsers" "$?" "0"
+assert yaml.safe_load(t)==minyaml.load(t)"; then ok "sessions.yaml parses with both parsers"; else bad "sessions.yaml parses with both parsers" ""; fi
+else
+    skip "sessions.yaml parses with both parsers (PyYAML not installed)"
+fi
 
 cmd=$(python3 -c "
 import sys; sys.path.insert(0,'$REPO/lib')
@@ -388,7 +411,7 @@ check "pane watcher does not relay its own inbox back" "$?" "1"
 # -------------------------------------------------------------- hook discovery
 echo "== hook discovery =="
 "$SW" up -c s.yaml --no-prompt >/dev/null 2>&1; sleep 1
-out=$( cd ws/A && echo '{"transcript_path":"'$T'/done.jsonl"}' | SWARM_CONFIG="$REPO/agents.example.yaml" "$SW" hook claude 2>&1; echo "rc=$?" )
+out=$( cd ws/A && echo '{"transcript_path":"'"$T"'/done.jsonl"}' | SWARM_CONFIG="$REPO/agents.example.yaml" "$SW" hook claude 2>&1; echo "rc=$?" )
 echo "$out" | grep -q "rc=0"
 check "hook ignores a wrong SWARM_CONFIG and finds itself from cwd" "$?" "0"
 "$SW" down -c s.yaml >/dev/null 2>&1
@@ -396,6 +419,6 @@ tmux kill-server 2>/dev/null
 
 echo
 echo "=================================================="
-printf "  passed: %s   failed: %s\n" "$PASS" "$FAIL"
+printf "  passed: %s   failed: %s   skipped: %s\n" "$PASS" "$FAIL" "$SKIP"
 echo "=================================================="
 [ "$FAIL" -eq 0 ]

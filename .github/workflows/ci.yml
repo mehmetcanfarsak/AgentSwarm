@@ -41,6 +41,12 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install tmux
 
+      # PyYAML is NOT a runtime dependency (minyaml is the bundled fallback), but
+      # the suite's parser-parity checks compare the two, so they need PyYAML to
+      # run. The stdlib-only job below covers the no-PyYAML path end to end.
+      - name: Install PyYAML (test-only; runtime never requires it)
+        run: python3 -m pip install --upgrade pyyaml
+
       - name: Print tool versions
         run: |
           python3 --version
@@ -72,6 +78,46 @@ jobs:
             exit 1
           fi
           echo "ok: template correctly reports the missing user workdir"
+
+      - name: Run full validation suite (mock agents, no API keys)
+        run: tests/validate.sh
+
+  # Prove the zero-dependency promise: everything must work with a bare stdlib
+  # Python (no PyYAML). The suite skips the parser-parity checks here; the matrix
+  # job above installs PyYAML to run them.
+  stdlib:
+    name: stdlib fallback (no PyYAML)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Confirm PyYAML is absent
+        run: |
+          if python3 -c "import yaml" 2>/dev/null; then
+            echo "unexpected: PyYAML is importable on the stdlib runner" >&2
+            exit 1
+          fi
+          echo "ok: no PyYAML -- exercising the bundled minyaml fallback"
+
+      - name: Byte-compile Python (stdlib only, no runtime deps)
+        run: python3 -m compileall -q lib/
+
+      - name: Validate self-contained example configs (minyaml path)
+        run: |
+          set -e
+          for f in agents.example.yaml examples/bug-hunt.yaml \
+                   examples/research-swarm.yaml examples/software-company.yaml; do
+            echo "== validate $f =="
+            ./agentainer validate -c "$f"
+          done
 
       - name: Run full validation suite (mock agents, no API keys)
         run: tests/validate.sh
