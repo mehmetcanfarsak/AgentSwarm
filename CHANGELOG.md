@@ -4,6 +4,16 @@ All notable changes to Agentainer are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.6]
+
+### Added
+- `agentainer --version` / `agentainer -v` print the installed version (read from
+  `package.json`, the single source of truth).
+
+### Tests
+- Cover the new `read_version` helper and version flag (415 pytest cases, 50
+  `validate.sh` checks; `lib/` stays at 100% line coverage).
+
 ## [0.1.5]
 
 ### Added

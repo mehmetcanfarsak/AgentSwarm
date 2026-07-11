@@ -1,6 +1,6 @@
 {
   "name": "agentainer",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Zero-dependency multi-agent orchestrator: run a team of AI coding agents (Claude Code, Codex, Gemini, Hermes) side by side in tmux with a YAML-defined ACL.",
   "keywords": [
     "agents",
